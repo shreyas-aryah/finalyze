@@ -1,6 +1,7 @@
 "use client";
 
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import Link from "next/link";
 import React from "react";
 import { Button } from "../../components/ui/button";
 
@@ -22,10 +23,10 @@ export default function Dashboard() {
             <nav className="flex justify-between items-center p-6 border-b">
                 <div className="text-xl font-semibold">Finalyze AI</div>
                 <div className="flex gap-6 items-center">
-                    <a href="#" className="hover:underline">Upload</a>
-                    <a href="#" className="hover:underline">Details</a>
-                    <a href="#" className="hover:underline">Reports</a>
-                    <a href="#" className="hover:underline">Insights</a>
+                    <Link href="/upload" className="hover:underline">Upload</Link>
+                    <Link href="/details" className="hover:underline">Details</Link>
+                    <Link href="/reports" className="hover:underline">Reports</Link>
+                    <Link href="/insights" className="hover:underline">Insights</Link>
 
                     {/* Conditional rendering based on auth state */}
                     {isSignedIn ? (
