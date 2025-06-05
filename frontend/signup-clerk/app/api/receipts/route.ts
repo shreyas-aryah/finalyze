@@ -1,39 +1,62 @@
-// app/api/receipts/route.ts
+// Import necessary modules
+import fs from "fs"; // File system module to read directories/files
+import { NextRequest, NextResponse } from "next/server"; // For handling Next.js API routes
+import path from "path"; // To handle file paths cross-platform
+import Tesseract from "tesseract.js-node"; // Tesseract Node.js binding for OCR
 
-// Import necessary modules from Next.js and Node.js
-import fs from "fs"; // File system module to interact with files
-import { NextRequest, NextResponse } from "next/server"; // For handling API routes in Next.js
-import path from "path"; // Node.js module to handle file paths
-import Tesseract from "tesseract.js-node";
+// ----- GET Route: List available receipts -----
+export async function GET() {
+    try {
+        // Define the path to the directory where receipt images are stored
+        const receiptsDir = path.join(process.cwd(), "public", "receipts");
 
-// Define the POST route handler
+        // Read all files from the receipts directory
+        const files = fs.readdirSync(receiptsDir);
+
+        // Filter out non-image files (only include jpg, jpeg, png)
+        const imageFiles = files.filter(file =>
+            /\.(jpg|jpeg|png)$/i.test(file) // Case-insensitive match
+        );
+
+        // Return the list of image file names as JSON
+        return NextResponse.json({ receipts: imageFiles });
+    } catch (error) {
+        // Log any error that occurs and return a 500 response with error details
+        console.error("Error reading receipts:", error);
+        return NextResponse.json(
+            { error: "Failed to fetch receipts", details: String(error) },
+            { status: 500 }
+        );
+    }
+}
+
+// ----- POST Route: Perform OCR on a selected receipt -----
 export async function POST(req: NextRequest) {
     try {
-        // Parse the incoming request body to extract the file name
+        // Parse the JSON request body to get the fileName
         const { fileName } = await req.json();
 
-        // Construct the full path to the image file in the 'public/receipts' directory
+        // Build the absolute path to the image file in the receipts directory
         const imagePath = path.join(process.cwd(), "public", "receipts", fileName);
 
-        // Check if the file actually exists on the server
+        // Check if the file actually exists at the specified path
         if (!fs.existsSync(imagePath)) {
-            // Return a 404 response if the file does not exist
+            // If not found, return 404 error
             return NextResponse.json({ error: "File not found" }, { status: 404 });
         }
 
-        // Run OCR using Tesseract.js on the image file using the English language
+        // Perform OCR on the image using Tesseract with English language
         const result = await Tesseract.recognize(imagePath, "eng");
 
         // Return the extracted text in the response
         return NextResponse.json({
             message: "OCR completed",
-            text: result.data.text, // OCR result text
+            text: result.data.text, // Raw text result from OCR
         });
-    } catch (error) {
-        // Handle any errors during processing
-        console.error("OCR error:", error);
 
-        // Return a 500 Internal Server Error response with error details
+    } catch (error) {
+        // Handle and return any unexpected errors during OCR processing
+        console.error("OCR processing error:", error);
         return NextResponse.json(
             { error: "OCR failed", details: String(error) },
             { status: 500 }
