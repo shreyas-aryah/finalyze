@@ -3,6 +3,7 @@ import {
 } from '@clerk/nextjs'
 import { type Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import React from 'react'
 import './globals.css'
 
 // Configure Google Fonts with CSS variables for consistent typography
@@ -26,7 +27,7 @@ export const metadata: Metadata = {
 
 /**
 * Root Layout Component
-* 
+*
 * This layout wraps the entire application and provides:
 * 1. Clerk authentication context to all child components
 * 2. Global font variables for consistent typography
