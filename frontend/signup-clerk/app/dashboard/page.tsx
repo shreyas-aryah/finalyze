@@ -1,14 +1,51 @@
-"use client";
+"use client"; // Enables client-side features in a Next.js server component
 
+// Clerk authentication hooks and UI components
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+
+// Routing and UI libraries
 import Link from "next/link";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 
+// Add this above your component
+type Receipt = {
+  id: string;
+  fileName: string;
+  date: string;
+  amount: number;
+};
+
 export default function Dashboard() {
+    // Get user data and authentication state from Clerk
     const { user, isLoaded, isSignedIn } = useUser();
 
-    // Show loading state while Clerk is initializing
+    // Local state to store receipts and loading status
+    const [receipts, setReceipts] = useState<Receipt[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    // Fetch user's receipts from the backend API once the user is signed in
+    useEffect(() => {
+        async function fetchReceipts() {
+            setLoading(true); // Start loading state
+            try {
+                const res = await fetch("/api/receipts"); // Call receipts API
+                if (!res.ok) throw new Error("Failed to fetch receipts"); // Handle failed requests
+                const data = await res.json();
+                setReceipts(data.receipts || []); // Store receipts in state
+            } catch (error) {
+                console.error(error); // Log error to console
+            } finally {
+                setLoading(false); // End loading state
+            }
+        }
+
+        if (isSignedIn) {
+            fetchReceipts(); // Only fetch if user is signed in
+        }
+    }, [isSignedIn]);
+
+    // Show a loading screen while Clerk finishes initializing the user
     if (!isLoaded) {
         return (
             <div className="flex justify-center items-center min-h-screen">
@@ -23,14 +60,15 @@ export default function Dashboard() {
             <nav className="flex justify-between items-center p-6 border-b">
                 <div className="text-xl font-semibold">Finalyze AI</div>
                 <div className="flex gap-6 items-center">
+                    {/* Navigation Links */}
                     <Link href="/upload" className="hover:underline">Upload</Link>
                     <Link href="/details" className="hover:underline">Details</Link>
                     <Link href="/reports" className="hover:underline">Reports</Link>
                     <Link href="/insights" className="hover:underline">Insights</Link>
 
-                    {/* Conditional rendering based on auth state */}
+                    {/* Show user profile or login button based on auth status */}
                     {isSignedIn ? (
-                        <UserButton />
+                        <UserButton /> // User avatar dropdown if signed in
                     ) : (
                         <SignInButton>
                             <Button variant="default">Login</Button>
@@ -39,20 +77,22 @@ export default function Dashboard() {
                 </div>
             </nav>
 
-            {/* Main Content */}
+            {/* Main dashboard content */}
             <main className="p-10 space-y-10">
-                {/* Show different content based on auth state */}
                 {isSignedIn ? (
                     <>
+                        {/* Welcome message */}
                         <div>
-                            <h1 className="text-4xl font-bold mb-1">Welcome {user?.firstName || 'User'}</h1>
+                            <h1 className="text-4xl font-bold mb-1">
+                                Welcome {user?.firstName || 'User'}
+                            </h1>
                             <h2 className="text-2xl font-semibold">Dashboard</h2>
                         </div>
 
-                        {/* Placeholder for graph */}
+                        {/* Placeholder graph section */}
                         <div className="w-full h-64 bg-gray-100 rounded-xl shadow-inner" />
 
-                        {/* AI Recap Card */}
+                        {/* AI Recap Section */}
                         <div className="flex flex-col md:flex-row gap-8">
                             <div className="w-full h-40 bg-gray-200 rounded shadow" />
                             <div className="flex-1">
@@ -66,9 +106,30 @@ export default function Dashboard() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* User Receipts List */}
+                        <section>
+                            <h3 className="text-xl font-semibold mb-4">Your Receipts</h3>
+                            {loading ? (
+                                <p>Loading receipts...</p> // Loading indicator
+                            ) : receipts.length === 0 ? (
+                                <p>No receipts found.</p> // Empty state
+                            ) : (
+                                <ul className="space-y-4">
+                                    {/* Display each receipt in a styled list item */}
+                                    {receipts.map((r) => (
+                                        <li key={r.id} className="p-4 border rounded shadow-sm">
+                                            <p><strong>File:</strong> {r.fileName}</p>
+                                            <p><strong>Date:</strong> {r.date}</p>
+                                            <p><strong>Amount:</strong> {r.amount}</p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </section>
                     </>
                 ) : (
-                    // Show sign-in prompt for unauthenticated users
+                    // Message and sign-in prompt for unauthenticated users
                     <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
                         <div className="text-center">
                             <h1 className="text-4xl font-bold mb-4">Welcome to Finalyze AI</h1>
