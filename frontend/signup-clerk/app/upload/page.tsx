@@ -13,16 +13,18 @@ export default function UploadPage() {
     const { isLoaded, isSignedIn } = useUser(); // auth flags
 
     /* ------------------------------------------------------------------ */
-    /*  Local state for the selected file                                 */
+    /*  Local state                                                      */
     /* ------------------------------------------------------------------ */
     const [file, setFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
+    const [ocrText, setOcrText] = useState<string | null>(null); // Store OCR extracted text
 
     /* ------------------------------------------------------------------ */
     /*  Dropzone logic                                                    */
     /* ------------------------------------------------------------------ */
     const onDrop = useCallback((acceptedFiles: File[]) => {
         setFile(acceptedFiles[0]); // only store the first file
+        setOcrText(null);          // clear OCR text when new file selected
     }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -37,6 +39,7 @@ export default function UploadPage() {
     const handleUpload = async () => {
         if (!file) return;
         setUploading(true);
+        setOcrText(null); // Clear previous OCR text on upload start
 
         try {
             const formData = new FormData();
@@ -48,11 +51,16 @@ export default function UploadPage() {
             });
 
             const data = await res.json();
-            alert(data.message || data.error);
-            setFile(null); // clear file on success
+
+            if (res.ok) {
+                setOcrText(data.text || "No text extracted");
+                setFile(null); // Clear file after successful upload
+            } else {
+                setOcrText(`Error: ${data.error || "Unknown error"}`);
+            }
         } catch (err) {
             console.error(err);
-            alert("Upload failed");
+            setOcrText(`Upload failed: ${String(err)}`);
         } finally {
             setUploading(false);
         }
@@ -70,7 +78,7 @@ export default function UploadPage() {
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Page layout                                                       */
+    /*  Page layout                                                      */
     /* ------------------------------------------------------------------ */
     return (
         <div className="min-h-screen bg-white text-black">
@@ -103,7 +111,7 @@ export default function UploadPage() {
             </nav>
 
             {/* ---------------- Main Content -------------------------------- */}
-            <main className="p-10">
+            <main className="p-10 max-w-3xl mx-auto">
                 {isSignedIn ? (
                     <>
                         <h1 className="text-3xl font-bold mb-4">Upload Receipt</h1>
@@ -138,6 +146,14 @@ export default function UploadPage() {
                         >
                             {uploading ? "Uploading…" : "Upload"}
                         </Button>
+
+                        {/* OCR extracted text display */}
+                        {ocrText && (
+                            <section className="mt-8 p-4 border rounded bg-gray-50 whitespace-pre-wrap">
+                                <h2 className="font-semibold mb-2">Extracted Text:</h2>
+                                <pre className="text-sm">{ocrText}</pre>
+                            </section>
+                        )}
                     </>
                 ) : (
                     /* -------------- Sign-in prompt for guests ---------------- */
