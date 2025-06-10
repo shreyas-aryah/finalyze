@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['tesseract.js']
-  }
+  // experimental: {
+  //   serverExternalPackages: ['tesseract.js']
+  // }
 };
 
 export default nextConfig;
