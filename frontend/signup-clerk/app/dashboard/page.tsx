@@ -5,7 +5,7 @@ import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
 // Routing and UI libraries
 import Link from "next/link";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 
 // Add this above your component
@@ -108,25 +108,7 @@ export default function Dashboard() {
                         </div>
 
                         {/* User Receipts List */}
-                        <section>
-                            <h3 className="text-xl font-semibold mb-4">Your Receipts</h3>
-                            {loading ? (
-                                <p>Loading receipts...</p> // Loading indicator
-                            ) : receipts.length === 0 ? (
-                                <p>No receipts found.</p> // Empty state
-                            ) : (
-                                <ul className="space-y-4">
-                                    {/* Display each receipt in a styled list item */}
-                                    {receipts.map((r) => (
-                                        <li key={r.id} className="p-4 border rounded shadow-sm">
-                                            <p><strong>File:</strong> {r.fileName}</p>
-                                            <p><strong>Date:</strong> {r.date}</p>
-                                            <p><strong>Amount:</strong> {r.amount}</p>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </section>
+                        {/* The receipts list has been moved to the Details page. */}
                     </>
                 ) : (
                     // Message and sign-in prompt for unauthenticated users

@@ -2,7 +2,7 @@
 
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import React, { useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "../../components/ui/button";
 
@@ -84,7 +84,10 @@ export default function UploadPage() {
         <div className="min-h-screen bg-white text-black">
             {/* ---------------- Navbar (shared across pages) ---------------- */}
             <nav className="flex justify-between items-center p-6 border-b">
-                <div className="text-xl font-semibold">Finalyze AI</div>
+                <Link href="/dashboard" className="text-xl font-semibold hover:underline">
+                    Finalyze AI
+                </Link>
+
 
                 <div className="flex gap-6 items-center">
                     <Link href="/upload" className="hover:underline font-bold text-blue-600">
