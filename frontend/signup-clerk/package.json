@@ -11,11 +11,13 @@
   "dependencies": {
     "@clerk/nextjs": "^6.20.1",
     "@types/node-fetch": "^2.6.12",
+    "chart.js": "^4.4.9",
     "form-data": "^4.0.3",
     "lucide-react": "^0.513.0",
     "mongodb": "^6.17.0",
     "next": "15.3.2",
     "react": "^19.0.0",
+    "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.0.0",
     "react-dropzone": "^14.3.8",
     "tesseract.js": "^6.0.1"

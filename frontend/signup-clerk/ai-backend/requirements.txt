@@ -1,0 +1,20 @@
+# FastAPI for serving the AI models as an API
+fastapi
+uvicorn
+
+# Hugging Face Transformers and Datasets for model fine-tuning and inference
+transformers
+datasets
+
+# PyTorch for deep learning (used by most Hugging Face models)
+torch
+
+# Pillow and pytesseract for OCR tasks
+pillow
+pytesseract
+
+# scikit-learn for evaluation and utility functions
+scikit-learn
+
+# faiss-cpu for vector search (document/image retrieval)
+faiss-cpu 

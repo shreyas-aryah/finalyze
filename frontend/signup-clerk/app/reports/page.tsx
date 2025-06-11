@@ -1,11 +1,64 @@
 "use client";
 
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import {
+    CategoryScale,
+    Chart as ChartJS,
+    Legend,
+    LinearScale,
+    LineElement,
+    PointElement,
+    Title,
+    Tooltip,
+} from "chart.js";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { Line } from "react-chartjs-2";
 import { Button } from "../../components/ui/button";
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 export default function ReportsPage() {
     const { user, isLoaded, isSignedIn } = useUser();
+    const [summary, setSummary] = useState<any>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [trends, setTrends] = useState<any[]>([]);
+
+    // Fetch report summary from backend
+    useEffect(() => {
+        async function fetchSummary() {
+            setLoading(true);
+            setError(null);
+            try {
+                const res = await fetch("/api/receipts/summary");
+                if (!res.ok) throw new Error("Failed to fetch summary");
+                const data = await res.json();
+                setSummary(data.summary);
+            } catch (err: any) {
+                setError(err.message || "Unknown error");
+            } finally {
+                setLoading(false);
+            }
+        }
+        if (isSignedIn) fetchSummary();
+    }, [isSignedIn]);
+
+    // Fetch trends data
+    useEffect(() => {
+        async function fetchTrends() {
+            if (!isSignedIn) return;
+            try {
+                const res = await fetch("/api/receipts/trends");
+                if (!res.ok) throw new Error("Failed to fetch trends");
+                const data = await res.json();
+                setTrends(data.trends || []);
+            } catch (err) {
+                setTrends([]);
+            }
+        }
+        fetchTrends();
+    }, [isSignedIn]);
 
     // Wait for Clerk to load user session
     if (!isLoaded) {
@@ -50,21 +103,65 @@ export default function ReportsPage() {
                             <p className="text-gray-600 text-lg">View auto-generated summaries of your uploaded receipts.</p>
                         </div>
 
-                        {/* Placeholder for future report list */}
+                        {/* Real report data */}
                         <div className="space-y-6">
-                            <div className="bg-gray-100 rounded-lg p-6 shadow-sm">
-                                <h2 className="text-xl font-semibold mb-2">Monthly Expense Report</h2>
-                                <p className="text-sm text-gray-700">
-                                    This section will include a summary of your expenses by category.
-                                </p>
-                            </div>
+                            {loading ? (
+                                <div>Loading report...</div>
+                            ) : error ? (
+                                <div className="text-red-600">{error}</div>
+                            ) : summary ? (
+                                <>
+                                    <div className="bg-gray-100 rounded-lg p-6 shadow-sm">
+                                        <h2 className="text-xl font-semibold mb-2">Total Spending</h2>
+                                        <p className="text-2xl font-bold text-blue-700 mb-2">${summary.totalSpending?.toFixed(2) || 0}</p>
+                                        <p className="text-sm text-gray-700">Total number of receipts: {summary.receiptCount}</p>
+                                    </div>
 
-                            <div className="bg-gray-100 rounded-lg p-6 shadow-sm">
-                                <h2 className="text-xl font-semibold mb-2">Spending Trends</h2>
-                                <p className="text-sm text-gray-700">
-                                    Charts or visualizations will show how your spending changes over time.
-                                </p>
-                            </div>
+                                    <div className="bg-gray-100 rounded-lg p-6 shadow-sm">
+                                        <h2 className="text-xl font-semibold mb-2">Spending by Category</h2>
+                                        <ul className="text-sm text-gray-700">
+                                            {Object.entries(summary.categoryTotals || {}).map(([cat, amt]: any) => (
+                                                <li key={cat} className="flex justify-between border-b py-1">
+                                                    <span>{cat}</span>
+                                                    <span>${amt.toFixed(2)}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+
+                                    {trends.length > 0 && (
+                                        <div className="bg-gray-100 rounded-lg p-6 shadow-sm">
+                                            <h2 className="text-xl font-semibold mb-2">Spending Trends Over Time</h2>
+                                            <Line
+                                                data={{
+                                                    labels: trends.map((t: any) => t.month),
+                                                    datasets: [
+                                                        {
+                                                            label: "Total Spending",
+                                                            data: trends.map((t: any) => t.total),
+                                                            borderColor: "#2563eb",
+                                                            backgroundColor: "rgba(37,99,235,0.2)",
+                                                            tension: 0.4,
+                                                        },
+                                                    ],
+                                                }}
+                                                options={{
+                                                    responsive: true,
+                                                    plugins: {
+                                                        legend: { display: false },
+                                                        title: { display: false },
+                                                    },
+                                                    scales: {
+                                                        y: { beginAtZero: true },
+                                                    },
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div>No report data found.</div>
+                            )}
                         </div>
                     </>
                 ) : (
