@@ -98,11 +98,13 @@ export default function DetailsPage() {
     }, [isSignedIn, currentFolder]);
 
     // --- Helper to parse upload date from filename ---
+    // This function should only be used on the client to avoid hydration errors
     function getDateFromFilename(filename: string) {
-        const match = filename.match(/^(\d+)-/);
+        const match = filename.match(/^\d+-/);
         if (match) {
-            const date = new Date(Number(match[1]));
-            return date.toLocaleString();
+            // Use a fixed locale to avoid SSR/CSR mismatch
+            const date = new Date(Number(match[0].slice(0, -1)));
+            return date.toLocaleString('en-US');
         }
         return "Unknown";
     }

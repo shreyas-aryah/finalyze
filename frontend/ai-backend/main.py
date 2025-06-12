@@ -18,13 +18,23 @@ async def ocr_image(file: UploadFile = File(...)):
     text = pytesseract.image_to_string(image)
     return {"text": text}
 
+# --- /extract Endpoint for compatibility with frontend ---
+@app.post("/extract")
+async def extract_fields(file: UploadFile = File(...)):
+    # This endpoint does OCR extraction, same as /ocr
+    image_bytes = await file.read()
+    image = Image.open(io.BytesIO(image_bytes))
+    text = pytesseract.image_to_string(image)
+    # You can add more AI extraction logic here if needed
+    return {"fields": {"raw_text": text}, "category": "Uncategorized"}
+
 # --- Token Classification Endpoint (Field Extraction) ---
 # TODO: Load your fine-tuned model here
 # Example: model_name = "path/to/your/fine-tuned-bert"
 token_classifier = pipeline("token-classification", model="bert-base-cased")
 
 @app.post("/extract-fields")
-async def extract_fields(text: str = Form(...)):
+async def extract_fields_from_text(text: str = Form(...)):
     # Run token classification (field extraction)
     results = token_classifier(text)
     return {"fields": results}
