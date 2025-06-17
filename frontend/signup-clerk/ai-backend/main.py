@@ -19,12 +19,13 @@ async def ocr_image(file: UploadFile = File(...)):
 # --- /extract Endpoint for compatibility with frontend ---
 @app.post("/extract")
 async def extract_fields(file: UploadFile = File(...)):
-    # This endpoint does OCR extraction, same as /ocr
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes))
-    text = pytesseract.image_to_string(image)
-    # You can add more AI extraction logic here if needed
-    return {"fields": {"raw_text": text}, "category": "Uncategorized"}
+    try:
+        image_bytes = await file.read()
+        image = Image.open(io.BytesIO(image_bytes))
+        text = pytesseract.image_to_string(image)
+        return {"fields": {"raw_text": text}, "category": "Uncategorized"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"OCR extraction failed: {str(e)}"})
 
 # --- Token Classification Endpoint (Field Extraction) ---
 token_classifier = pipeline("token-classification", model="bert-base-cased")

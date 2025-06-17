@@ -1,11 +1,10 @@
 "use client"; // Enables client-side features in a Next.js server component
 
 // Clerk authentication hooks and UI components
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { SignInButton, useUser } from "@clerk/nextjs";
 
 // Routing and UI libraries
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 
 // Add this above your component
@@ -23,6 +22,9 @@ export default function Dashboard() {
     // Local state to store receipts and loading status
     const [receipts, setReceipts] = useState<Receipt[]>([]);
     const [loading, setLoading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [uploading, setUploading] = useState(false);
+    const [success, setSuccess] = useState(false);
 
     // Fetch user's receipts from the backend API once the user is signed in
     useEffect(() => {
@@ -45,6 +47,41 @@ export default function Dashboard() {
         }
     }, [isSignedIn]);
 
+    // Upload handler for dashboard
+    const handleDashboardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+        setUploading(true);
+        setSuccess(false);
+        try {
+            const formData = new FormData();
+            formData.append("file", files[0]);
+            const res = await fetch("/api/receipts", {
+                method: "POST",
+                body: formData,
+            });
+            if (res.ok) {
+                setSuccess(true);
+                // Refetch receipts after upload
+                const data = await res.json();
+                setReceipts(prev => [
+                    {
+                        id: data._id || Date.now().toString(),
+                        fileName: files[0].name,
+                        date: new Date().toLocaleDateString(),
+                        amount: 0,
+                    },
+                    ...prev
+                ]);
+            }
+        } catch (err) {
+            // Optionally handle error
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
     // Show a loading screen while Clerk finishes initializing the user
     if (!isLoaded) {
         return (
@@ -54,80 +91,94 @@ export default function Dashboard() {
         );
     }
 
+    // Show sign-in prompt if user is not authenticated
+    if (!isSignedIn) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
+                <h1 className="text-4xl font-bold mb-4">Please sign in to view your dashboard</h1>
+                <SignInButton>
+                    <Button variant="default" className="px-8 py-3 text-lg">
+                        Sign In to Continue
+                    </Button>
+                </SignInButton>
+            </div>
+        );
+    }
+
     return (
-        <div className="min-h-screen bg-white text-black">
-            {/* Navbar */}
-            <nav className="flex justify-between items-center p-6 border-b">
-                <div className="text-xl font-semibold">Finalyze AI</div>
-                <div className="flex gap-6 items-center">
-                    {/* Navigation Links */}
-                    <Link href="/upload" className="hover:underline">Upload</Link>
-                    <Link href="/details" className="hover:underline">Details</Link>
-                    <Link href="/reports" className="hover:underline">Reports</Link>
-                    <Link href="/insights" className="hover:underline">Insights</Link>
+        <div className="space-y-8">
+            {/* Welcome Section */}
+            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                    Welcome back, {user?.firstName || 'User'}!
+                </h1>
+                <p className="text-gray-600">
+                    Here's an overview of your receipts and expenses.
+                </p>
+            </div>
 
-                    {/* Show user profile or login button based on auth status */}
-                    {isSignedIn ? (
-                        <UserButton /> // User avatar dropdown if signed in
-                    ) : (
-                        <SignInButton>
-                            <Button variant="default">Login</Button>
-                        </SignInButton>
-                    )}
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">Total Receipts</h3>
+                    <p className="text-3xl font-bold text-gray-900">{receipts.length}</p>
                 </div>
-            </nav>
+                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">Total Spent</h3>
+                    <p className="text-3xl font-bold text-gray-900">
+                        ${receipts.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2)}
+                    </p>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">Average Amount</h3>
+                    <p className="text-3xl font-bold text-gray-900">
+                        ${receipts.length ? (receipts.reduce((sum, r) => sum + (r.amount || 0), 0) / receipts.length).toFixed(2) : '0.00'}
+                    </p>
+                </div>
+            </div>
 
-            {/* Main dashboard content */}
-            <main className="p-10 space-y-10">
-                {isSignedIn ? (
-                    <>
-                        {/* Welcome message */}
-                        <div>
-                            <h1 className="text-4xl font-bold mb-1">
-                                Welcome {user?.firstName || 'User'}
-                            </h1>
-                            <h2 className="text-2xl font-semibold">Dashboard</h2>
-                        </div>
-
-                        {/* Placeholder graph section */}
-                        <div className="w-full h-64 bg-gray-100 rounded-xl shadow-inner" />
-
-                        {/* AI Recap Section */}
-                        <div className="flex flex-col md:flex-row gap-8">
-                            <div className="w-full h-40 bg-gray-200 rounded shadow" />
-                            <div className="flex-1">
-                                <h3 className="text-lg font-semibold mb-2">AI-generated Recap of Expenses</h3>
-                                <p className="text-sm text-gray-600 mb-4">
-                                    Body text for whatever you'd like to expand on the main point.
-                                </p>
-                                <div className="flex gap-3">
-                                    <Button>Button</Button>
-                                    <Button variant="secondary">Secondary button</Button>
+            {/* Recent Receipts */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+                <div className="p-6 border-b border-gray-200">
+                    <h2 className="text-xl font-semibold text-gray-900">Recent Receipts</h2>
+                </div>
+                {loading ? (
+                    <div className="p-6 text-center text-gray-500">Loading receipts...</div>
+                ) : receipts.length === 0 ? (
+                    <div className="p-6 text-center text-gray-500">
+                        <p className="mb-4">No receipts found. Upload some receipts to get started!</p>
+                        <input
+                            type="file"
+                            accept="image/*"
+                            ref={fileInputRef}
+                            onChange={handleDashboardUpload}
+                            className="hidden"
+                        />
+                        <Button
+                            className="bg-blue-600 hover:bg-blue-700"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploading}
+                        >
+                            {uploading ? "Uploading..." : "Upload Receipt"}
+                        </Button>
+                        {success && <div className="mt-4 text-green-600 font-semibold">Receipt uploaded successfully!</div>}
+                    </div>
+                ) : (
+                    <div className="divide-y divide-gray-200">
+                        {receipts.slice(0, 5).map((receipt) => (
+                            <div key={receipt.id} className="p-6 hover:bg-gray-50 transition-colors">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-lg font-medium text-gray-900">{receipt.fileName}</h3>
+                                        <p className="text-sm text-gray-500">{receipt.date}</p>
+                                    </div>
+                                    <p className="text-lg font-semibold text-gray-900">${receipt.amount}</p>
                                 </div>
                             </div>
-                        </div>
-
-                        {/* User Receipts List */}
-                        {/* The receipts list has been moved to the Details page. */}
-                    </>
-                ) : (
-                    // Message and sign-in prompt for unauthenticated users
-                    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
-                        <div className="text-center">
-                            <h1 className="text-4xl font-bold mb-4">Welcome to Finalyze AI</h1>
-                            <p className="text-xl text-gray-600 mb-8">
-                                Please sign in to access your financial dashboard
-                            </p>
-                        </div>
-
-                        <SignInButton>
-                            <Button variant="default" className="px-8 py-3 text-lg">
-                                Sign In to Continue
-                            </Button>
-                        </SignInButton>
+                        ))}
                     </div>
                 )}
-            </main>
+            </div>
         </div>
     );
 }

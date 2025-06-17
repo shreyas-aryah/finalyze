@@ -1,8 +1,7 @@
 "use client"; // Make this a client component (required for hooks like useDropzone)
 
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
-import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useUser } from "@clerk/nextjs";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "../../components/ui/button";
 
@@ -18,6 +17,10 @@ export default function UploadPage() {
     const [file, setFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
     const [ocrText, setOcrText] = useState<string | null>(null); // Store OCR extracted text
+    const [isDragging, setIsDragging] = useState(false);
+    const [preview, setPreview] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     /* ------------------------------------------------------------------ */
     /*  Dropzone logic                                                    */
@@ -33,28 +36,64 @@ export default function UploadPage() {
         accept: { "image/*": [] }, // optional: limit to images
     });
 
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const dataTransfer = e.dataTransfer;
+        if (dataTransfer && dataTransfer.files) {
+            const files = Array.from(dataTransfer.files);
+            onDrop(files);
+        }
+    };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (files && files.length > 0) {
+            setFile(files[0]);
+        }
+    };
+
+    const handleBrowseClick = () => {
+        fileInputRef.current?.click();
+    };
+
     /* ------------------------------------------------------------------ */
     /*  Upload handler (POST with FormData)                               */
     /* ------------------------------------------------------------------ */
     const handleUpload = async () => {
-        if (!file) return;
+        if (!file || uploading) return; // Prevent double upload
         setUploading(true);
         setOcrText(null); // Clear previous OCR text on upload start
-
+        setSuccess(false);
         try {
             const formData = new FormData();
             formData.append("file", file);
-
             const res = await fetch("/api/receipts", {
                 method: "POST",
                 body: formData,
             });
-
-            const data = await res.json();
-
+            let data;
+            try {
+                data = await res.json();
+            } catch (err) {
+                setOcrText("Error: Invalid response from server");
+                setUploading(false);
+                return;
+            }
             if (res.ok) {
-                setOcrText(data.text || "No text extracted");
+                setOcrText(data.text || data.fields?.raw_text || "No text extracted");
                 setFile(null); // Clear file after successful upload
+                setSuccess(true); // Show success message
             } else {
                 setOcrText(`Error: ${data.error || "Unknown error"}`);
             }
@@ -80,96 +119,109 @@ export default function UploadPage() {
     /* ------------------------------------------------------------------ */
     /*  Page layout                                                      */
     /* ------------------------------------------------------------------ */
+    // Set preview image when file is selected
+    useEffect(() => {
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => setPreview(reader.result as string);
+            reader.readAsDataURL(file);
+        } else {
+            setPreview(null);
+        }
+    }, [file]);
+
     return (
-        <div className="min-h-screen bg-white text-black">
-            {/* ---------------- Navbar (shared across pages) ---------------- */}
-            <nav className="flex justify-between items-center p-6 border-b">
-                <Link href="/dashboard" className="text-xl font-semibold hover:underline">
-                    Finalyze AI
-                </Link>
-
-
-                <div className="flex gap-6 items-center">
-                    <Link href="/upload" className="hover:underline font-bold text-blue-600">
-                        Upload
-                    </Link>
-                    <Link href="/details" className="hover:underline">
-                        Details
-                    </Link>
-                    <Link href="/reports" className="hover:underline">
-                        Reports
-                    </Link>
-                    <Link href="/insights" className="hover:underline">
-                        Insights
-                    </Link>
-
-                    {isSignedIn ? (
-                        <UserButton />
+        <div className="max-w-3xl mx-auto">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+                <h1 className="text-3xl font-bold text-gray-900 mb-6">Upload Receipt</h1>
+                <p className="text-gray-500 mb-8">Drag an image of your receipt into the box below, or click to browse.</p>
+                {/* Upload Area */}
+                <div 
+                    className={`border-2 border-dashed rounded-lg p-12 text-center ${
+                        isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                    } transition-colors`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                >
+                    {file ? (
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-center">
+                                <img 
+                                    src={preview} 
+                                    alt="Preview" 
+                                    className="max-h-64 rounded-lg shadow-sm"
+                                />
+                            </div>
+                            <p className="text-sm text-gray-600">{file.name}</p>
+                            <div className="flex justify-center gap-4">
+                                <Button 
+                                    onClick={handleUpload}
+                                    disabled={uploading}
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                >
+                                    {uploading ? 'Uploading...' : 'Upload'}
+                                </Button>
+                                <Button 
+                                    onClick={() => setFile(null)}
+                                    variant="outline"
+                                >
+                                    Cancel
+                                </Button>
+                            </div>
+                        </div>
                     ) : (
-                        <SignInButton>
-                            <Button variant="default">Login</Button>
-                        </SignInButton>
+                        <div className="space-y-4">
+                            <div className="flex justify-center">
+                                <svg 
+                                    className="w-12 h-12 text-gray-400" 
+                                    fill="none" 
+                                    stroke="currentColor" 
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path 
+                                        strokeLinecap="round" 
+                                        strokeLinejoin="round" 
+                                        strokeWidth={2} 
+                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" 
+                                    />
+                                </svg>
+                            </div>
+                            <div className="text-gray-600">
+                                <p className="font-medium">Drag & drop a receipt here, or click to select</p>
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                    ref={fileInputRef}
+                                />
+                                <Button className="mt-2 bg-blue-600 hover:bg-blue-700" onClick={handleBrowseClick}>
+                                    Browse Files
+                                </Button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                                Supports JPG, PNG, and PDF files up to 10MB
+                            </p>
+                        </div>
                     )}
                 </div>
-            </nav>
 
-            {/* ---------------- Main Content -------------------------------- */}
-            <main className="p-10 max-w-3xl mx-auto">
-                {isSignedIn ? (
-                    <>
-                        <h1 className="text-3xl font-bold mb-4">Upload Receipt</h1>
-                        <p className="text-gray-600 mb-6">
-                            Drag an image of your receipt into the box below, or click to browse.
-                        </p>
-
-                        {/* Dropzone container */}
-                        <div
-                            {...getRootProps()}
-                            className="flex flex-col items-center justify-center
-                         border-2 border-dashed rounded-lg p-8 cursor-pointer
-                         transition-colors hover:bg-gray-50"
-                        >
-                            <input {...getInputProps()} />
-
-                            {isDragActive ? (
-                                <p>Drop the file here…</p>
-                            ) : (
-                                <p>Drag &amp; drop a receipt here, or click to select</p>
-                            )}
+                {/* OCR Results */}
+                {success && (
+                    <div className="mt-8 text-green-600 font-semibold">Receipt uploaded successfully!</div>
+                )}
+                {ocrText && (
+                    <div className="mt-8">
+                        <h2 className="text-xl font-semibold text-gray-900 mb-4">Extracted Text</h2>
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+                                {ocrText}
+                            </pre>
                         </div>
-
-                        {/* Selected file name */}
-                        {file && <p className="mt-4 text-sm">Selected file: {file.name}</p>}
-
-                        {/* Upload button */}
-                        <Button
-                            className="mt-6"
-                            onClick={handleUpload}
-                            disabled={!file || uploading}
-                        >
-                            {uploading ? "Uploading…" : "Upload"}
-                        </Button>
-
-                        {/* OCR extracted text display */}
-                        {ocrText && (
-                            <section className="mt-8 p-4 border rounded bg-gray-50 whitespace-pre-wrap">
-                                <h2 className="font-semibold mb-2">Extracted Text:</h2>
-                                <pre className="text-sm">{ocrText}</pre>
-                            </section>
-                        )}
-                    </>
-                ) : (
-                    /* -------------- Sign-in prompt for guests ---------------- */
-                    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
-                        <h1 className="text-4xl font-bold mb-4">Please sign in to upload receipts</h1>
-                        <SignInButton>
-                            <Button variant="default" className="px-8 py-3 text-lg">
-                                Sign In to Continue
-                            </Button>
-                        </SignInButton>
                     </div>
                 )}
-            </main>
+            </div>
         </div>
     );
 }

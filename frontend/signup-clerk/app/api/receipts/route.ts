@@ -163,14 +163,48 @@ export async function PATCH(req: NextRequest) {
 /* -------------------------------------------------- */
 export async function DELETE(req: NextRequest) {
     try {
+        const { userId } = await auth();
+        if (!userId) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         const { file, folder = "" } = await req.json();
         if (!file) {
             return NextResponse.json({ error: "Missing file" }, { status: 400 });
         }
+
+        // Delete from file system if it exists
         const filePath = path.join(RECEIPTS_DIR, folder, file);
-        await fs.unlink(filePath);
-        return NextResponse.json({ message: "File deleted" });
+        try {
+            await fs.access(filePath); // Check if file exists
+            await fs.unlink(filePath);
+        } catch (fsError) {
+            // If file doesn't exist, that's okay - we'll still clean up MongoDB
+            console.log(`File ${filePath} not found, continuing with MongoDB cleanup`);
+        }
+
+        // Delete from MongoDB
+        const client = await clientPromise;
+        const db = client.db("finalyze");
+        const result = await db.collection("receipts").deleteOne({ 
+            userId,
+            fileName: file 
+        });
+
+        if (result.deletedCount === 0) {
+            console.log(`No MongoDB record found for file ${file}`);
+        }
+
+        return NextResponse.json({ 
+            message: "Receipt deleted",
+            fileDeleted: true,
+            dbDeleted: result.deletedCount > 0
+        });
     } catch (error) {
-        return NextResponse.json({ error: "Failed to delete file", details: String(error) }, { status: 500 });
+        console.error("Delete error:", error);
+        return NextResponse.json({ 
+            error: "Failed to delete receipt", 
+            details: String(error) 
+        }, { status: 500 });
     }
 }
