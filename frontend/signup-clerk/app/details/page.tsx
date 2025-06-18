@@ -28,7 +28,8 @@ export default function DetailsPage() {
     const { user, isLoaded, isSignedIn } = useUser(); // Get user auth info
 
     // --- Local state for folders, receipts, and UI ---
-    const [folders, setFolders] = useState<string[]>([]);
+    const [folders, setFolders] = useState<string[]>([]); // Only direct subfolders of current folder
+    const [allFolders, setAllFolders] = useState<string[]>([]); // All folders recursively for sidebar
     const [currentFolder, setCurrentFolder] = useState<string>("");
     const [receipts, setReceipts] = useState<string[]>([]); // Now just filenames
     const [loading, setLoading] = useState(false);
@@ -55,13 +56,12 @@ export default function DetailsPage() {
     async function refetchReceipts() {
         setLoading(true);
         try {
-            const res = await fetch("/api/receipts/list");
+            const res = await fetch(`/api/receipts?folder=${encodeURIComponent(currentFolder)}`);
             if (!res.ok) throw new Error("Failed to fetch receipts");
             const data = await res.json();
-            setStructuredReceipts(data.receipts || []);
-            setFolders(data.folders || []);
+            setFolders(data.folders || []); // Only set folders from the current folder API
+            setReceipts(data.files || []);
             setMeta(data.meta || {});
-            setReceipts((data.receipts || []).map((r: any) => r.fileName));
             setSelected(new Set()); // Always clear selection after fetch
             setSelectAll(false);
         } catch (error) {
@@ -99,6 +99,23 @@ export default function DetailsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isSignedIn, currentFolder]);
 
+    // --- Fetch all folders recursively for sidebar tree ---
+    async function refreshAllFolders() {
+        try {
+            const res = await fetch('/api/receipts/list');
+            if (!res.ok) throw new Error('Failed to fetch all folders');
+            const data = await res.json();
+            setAllFolders(data.folders || []); // Only set allFolders here
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    useEffect(() => {
+        if (isSignedIn) refreshAllFolders();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSignedIn]);
+
     // --- Helper to parse upload date from filename ---
     function getDateFromFilename(filename: string) {
         const match = filename.match(/^\d+-/);
@@ -131,15 +148,21 @@ export default function DetailsPage() {
 
     // --- Bulk: Select all/none ---
     function handleSelectAll() {
-        if (selectAll) {
+        if (selected.size === structuredReceipts.length && structuredReceipts.length > 0) {
             setSelected(new Set());
-            setSelectAll(false);
         } else {
-            const all = new Set(structuredReceipts.map(r => r.fileName));
-            setSelected(all);
-            setSelectAll(true);
+            setSelected(new Set(structuredReceipts.map(r => r.fileName)));
         }
     }
+
+    // --- Sync selectAll state with actual selection ---
+    useEffect(() => {
+        if (structuredReceipts.length > 0 && selected.size === structuredReceipts.length) {
+            setSelectAll(true);
+        } else {
+            setSelectAll(false);
+        }
+    }, [selected, structuredReceipts]);
 
     // --- Checkbox for each receipt: keep selectAll in sync ---
     function handleCheckboxChange(fileName: string, checked: boolean) {
@@ -176,6 +199,7 @@ export default function DetailsPage() {
             
             // Refetch to update the UI
             await refetchReceipts();
+            await refreshStructuredReceipts();
         } catch (error) {
             console.error('Delete error:', error);
             alert('Failed to delete receipt. Please try again.');
@@ -184,6 +208,15 @@ export default function DetailsPage() {
 
     // --- Bulk: Group selected into folder ---
     async function handleBulkMove(toFolder: string) {
+        if (!toFolder) return;
+        // If creating a new folder, create it first
+        if (bulkFolder === "new" && newBulkFolder) {
+            await fetch("/api/receipts", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ editFolder: { oldName: newBulkFolder, newName: newBulkFolder, color: "#3b82f6" } }),
+            });
+        }
         for (const file of Array.from(selected)) {
             await fetch("/api/receipts", {
                 method: "PATCH",
@@ -192,8 +225,11 @@ export default function DetailsPage() {
             });
         }
         await refetchReceipts();
+        await refreshStructuredReceipts();
         setBulkFolder("");
         setNewBulkFolder("");
+        setSelected(new Set());
+        setSelectAll(false);
     }
 
     // --- Bulk: Delete selected ---
@@ -216,10 +252,28 @@ export default function DetailsPage() {
             setSelected(new Set());
             setSelectAll(false);
             await refetchReceipts();
+            await refreshStructuredReceipts();
         } catch (error) {
             console.error('Bulk delete error:', error);
             alert('Failed to delete some receipts. Please try again.');
         }
+    }
+
+    // --- Handler to delete a folder ---
+    async function handleDeleteFolder(folderName: string) {
+        if (!folderName) return;
+        await fetch("/api/receipts", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folder: folderName }),
+        });
+        setEditingFolder(null);
+        setEditName("");
+        setEditColor("");
+        setCurrentFolder("");
+        await refetchReceipts();
+        await refreshAllFolders();
+        await refreshStructuredReceipts();
     }
 
     // --- Handler to edit folder name and color ---
@@ -233,8 +287,10 @@ export default function DetailsPage() {
         setEditingFolder(null);
         setEditName("");
         setEditColor("");
-        // Refresh
         setCurrentFolder("");
+        await refetchReceipts();
+        await refreshAllFolders();
+        await refreshStructuredReceipts();
     }
 
     // --- Handler for dropping a receipt into a folder ---
@@ -247,27 +303,140 @@ export default function DetailsPage() {
         setReceipts((prev) => prev.filter(f => f !== file));
         setDraggedFile(null);
         setDragOverFolder(null);
+        await refetchReceipts();
+        await refreshStructuredReceipts();
     }
 
     // --- Handler to create a new folder (with color) ---
     async function handleCreateFolder() {
         if (!newFolderName) return;
+        const fullFolderName = currentFolder ? `${currentFolder}/${newFolderName}` : newFolderName;
         await fetch("/api/receipts", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ editFolder: { oldName: newFolderName, newName: newFolderName, color: newFolderColor } }),
+            body: JSON.stringify({ editFolder: { oldName: fullFolderName, newName: fullFolderName, color: newFolderColor } }),
         });
         setShowCreateFolder(false);
         setNewFolderName("");
         setNewFolderColor("#3b82f6");
         setCurrentFolder("");
         await refetchReceipts();
+        await refreshAllFolders();
+        await refreshStructuredReceipts();
     }
 
     // --- Handler to close preview modal ---
     function closePreview() {
         setPreviewImg(null);
     }
+
+    // --- Filter receipts for display ---
+    const displayedReceipts = structuredReceipts.filter(r => {
+        if (currentFolder === "") {
+            // Only show receipts not in any folder (root)
+            return !r.folder || r.folder === "";
+        } else {
+            // Only show receipts in the current folder
+            return r.folder === currentFolder;
+        }
+    });
+
+    // --- Helper to get parent folder ---
+    function getParentFolder(folder: string): string | null {
+        if (!folder) return null;
+        const parts = folder.split("/");
+        if (parts.length <= 1) return "";
+        parts.pop();
+        return parts.join("/");
+    }
+
+    // --- Helper to get subfolder path ---
+    function getSubfolderPath(base: string, sub: string) {
+        return base ? `${base}/${sub}` : sub;
+    }
+
+    // --- Helper: Build folder tree from flat folder paths ---
+    function buildFolderTree(folders: string[]) {
+        const root: any = {};
+        for (const path of folders) {
+            const parts = path.split("/");
+            let node = root;
+            for (const part of parts) {
+                if (!node[part]) node[part] = {};
+                node = node[part];
+            }
+        }
+        return root;
+    }
+
+    // --- Helper: Render folder tree recursively ---
+    function renderFolderTree(node: any, basePath = "", depth = 0) {
+        return Object.keys(node).sort().map((name) => {
+            const fullPath = basePath ? `${basePath}/${name}` : name;
+            const isCurrent = currentFolder === fullPath;
+            const isAncestor = currentFolder.startsWith(fullPath + "/");
+            return (
+                <div key={fullPath} style={{ marginLeft: depth * 16 }}>
+                    <button
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-all w-full text-left ${isCurrent ? 'bg-blue-100 text-blue-700' : isAncestor ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 text-gray-700'}`}
+                        style={{ borderLeft: `6px solid ${meta[fullPath]?.color || '#3b82f6'}` }}
+                        onClick={() => setCurrentFolder(fullPath)}
+                    >
+                        <span className="w-3 h-3 rounded-full mr-2" style={{ background: meta[fullPath]?.color || '#3b82f6' }}></span>
+                        <span className="truncate">{meta[fullPath]?.name || name}</span>
+                    </button>
+                    {isAncestor && renderFolderTree(node[name], fullPath, depth + 1)}
+                </div>
+            );
+        });
+    }
+
+    // --- Helper: Breadcrumb for current folder ---
+    function renderBreadcrumb() {
+        if (!currentFolder) return null;
+        const parts = currentFolder.split("/");
+        let path = "";
+        return (
+            <div className="flex items-center gap-2 mb-4 text-sm text-blue-700">
+                <button onClick={() => setCurrentFolder("")} className="hover:underline">All Receipts</button>
+                {parts.map((part, idx) => {
+                    path = idx === 0 ? part : `${path}/${part}`;
+                    return (
+                        <span key={path} className="flex items-center gap-2">
+                            <span>/</span>
+                            <button
+                                onClick={() => setCurrentFolder(path)}
+                                className={`hover:underline ${path === currentFolder ? 'font-bold' : ''}`}
+                            >
+                                {meta[path]?.name || part}
+                            </button>
+                        </span>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    // --- Build the folder tree for the sidebar ---
+    const folderTree = buildFolderTree(allFolders);
+
+    // --- Fetch structured receipts from MongoDB for the main grid ---
+    async function refreshStructuredReceipts() {
+        try {
+            const res = await fetch('/api/receipts/list');
+            if (!res.ok) throw new Error('Failed to fetch structured receipts');
+            const data = await res.json();
+            setStructuredReceipts(data.receipts || []);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    // --- On mount/sign-in, fetch structured receipts ---
+    useEffect(() => {
+        if (isSignedIn) refreshStructuredReceipts();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSignedIn]);
 
     // Show loading spinner while auth is initializing
     if (!isLoaded) {
@@ -279,271 +448,299 @@ export default function DetailsPage() {
     }
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-7xl mx-auto px-0 sm:px-0 lg:px-0 py-8">
             {isSignedIn ? (
-                <div>
-                    {/* --- Bulk Action Dropdown Menu --- */}
-                    {structuredReceipts.length > 0 && (
-                        <div className="flex items-center gap-4 mb-6">
-                            <div className="relative">
-                                <button
-                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-sm font-semibold shadow transition-all"
-                                    onClick={() => setSelectAll(!selectAll)}
-                                >
-                                    {selectAll ? "Deselect All" : "Select All"}
-                                </button>
-                            </div>
-                            {selected.size > 0 && (
-                                <div className="flex items-center gap-2">
-                                    <select
-                                        value={bulkFolder}
-                                        onChange={e => setBulkFolder(e.target.value)}
-                                        className="px-3 py-2 border rounded text-sm"
-                                    >
-                                        <option value="">Move to folder...</option>
-                                        {folders.map(f => (
-                                            <option key={f} value={f}>{f}</option>
-                                        ))}
-                                        <option value="new">+ Create New Folder</option>
-                                    </select>
-                                    {bulkFolder === "new" && (
-                                        <input
-                                            type="text"
-                                            value={newBulkFolder}
-                                            onChange={e => setNewBulkFolder(e.target.value)}
-                                            placeholder="New folder name"
-                                            className="px-3 py-2 border rounded text-sm"
-                                        />
-                                    )}
-                                    {(bulkFolder || newBulkFolder) && (
-                                        <button
-                                            className="px-3 py-2 bg-blue-600 text-white rounded text-sm"
-                                            onClick={() => handleBulkMove(newBulkFolder || bulkFolder)}
-                                        >
-                                            Move
-                                        </button>
-                                    )}
-                                    <button
-                                        className="px-3 py-2 bg-red-600 text-white rounded text-sm"
-                                        onClick={handleBulkDelete}
-                                    >
-                                        Delete Selected
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* --- Back to Parent Button (if inside a folder) --- */}
-                    {currentFolder && (
+                <div className="flex gap-8">
+                    {/* --- Sidebar: Folder Navigation --- */}
+                    <aside className="w-64 min-w-[200px] max-w-xs bg-white border-r border-gray-200 rounded-2xl shadow-md p-6 flex flex-col gap-2 h-fit sticky top-8 self-start ml-0">
+                        <h2 className="text-lg font-bold mb-4 text-blue-700">Folders</h2>
                         <button
-                            className="mb-4 flex items-center gap-2 text-blue-600 hover:text-blue-800 font-semibold px-3 py-1 rounded bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all"
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-all w-full text-left ${currentFolder === "" ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}
                             onClick={() => setCurrentFolder("")}
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 3h6a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                             </svg>
-                            Back to All Folders
+                            All Receipts
                         </button>
-                    )}
-
-                    {/* --- Folders and Receipts Grid --- */}
-                    <h1 className="text-3xl font-bold mb-4">Receipt Details</h1>
-                    {loading ? (
-                        <p>Loading receipts...</p>
-                    ) : receipts.length === 0 && folders.length === 0 ? (
-                        <p>No receipts or folders found.</p>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                            {/* --- Folder Cards --- */}
-                            {folders.map((folder) => (
-                                <div
-                                    key={folder}
-                                    className={`group bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg shadow hover:shadow-lg p-6 flex flex-col items-center justify-center transition-all hover:scale-105 focus:outline-none relative ${dragOverFolder === folder ? 'ring-4 ring-blue-400' : ''}`}
-                                    style={{ borderColor: meta[folder]?.color || undefined }}
-                                    onDragOver={e => { e.preventDefault(); setDragOverFolder(folder); }}
-                                    onDragLeave={e => { e.preventDefault(); setDragOverFolder(null); }}
-                                    onDrop={e => {
-                                        e.preventDefault();
-                                        if (draggedFile) handleDropToFolder(draggedFile, folder);
-                                    }}
-                                >
-                                    {/* Folder Icon */}
-                                    <button
-                                        className="absolute top-2 right-2 text-gray-400 hover:text-blue-600"
-                                        onClick={e => { e.stopPropagation(); setEditingFolder(folder); setEditName(folder); setEditColor(meta[folder]?.color || ""); }}
-                                        title="Edit folder"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13h3l8-8a2.828 2.828 0 10-4-4l-8 8v3z" />
-                                        </svg>
-                                    </button>
-                                    <button
-                                        className="w-full flex flex-col items-center focus:outline-none"
-                                        onClick={() => setCurrentFolder(folder)}
-                                        tabIndex={0}
-                                        style={{ color: meta[folder]?.color || undefined }}
-                                    >
-                                        <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 3h6a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                                        </svg>
-                                        <span className="font-semibold text-lg truncate w-full text-center">{meta[folder]?.name || folder}</span>
-                                        <span className="text-xs mt-1">Folder</span>
-                                    </button>
-                                    {/* Edit Modal (inline) */}
-                                    {editingFolder === folder && (
-                                        <div className="absolute z-50 top-10 left-1/2 -translate-x-1/2 bg-white border border-blue-200 rounded-lg shadow-lg p-4 w-64 flex flex-col gap-2">
-                                            <label className="text-xs font-semibold">Folder Name</label>
-                                            <input
-                                                className="border rounded px-2 py-1 text-sm"
-                                                value={editName}
-                                                onChange={e => setEditName(e.target.value)}
-                                            />
-                                            <label className="text-xs font-semibold mt-2">Color</label>
-                                            <input
-                                                type="color"
-                                                className="w-8 h-8 p-0 border-none bg-transparent"
-                                                value={editColor || "#3b82f6"}
-                                                onChange={e => setEditColor(e.target.value)}
-                                            />
-                                            <div className="flex gap-2 mt-3">
-                                                <button
-                                                    className="flex-1 px-2 py-1 bg-blue-600 text-white rounded text-xs"
-                                                    onClick={handleEditFolderSubmit}
-                                                >Save</button>
-                                                <button
-                                                    className="flex-1 px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs"
-                                                    onClick={() => setEditingFolder(null)}
-                                                >Cancel</button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                            {/* --- Receipt Cards (structured data) --- */}
-                            {structuredReceipts.map((receipt) => (
-                                <div
-                                    key={receipt._id || receipt.fileName}
-                                    className={`bg-white border rounded-lg shadow p-4 flex flex-col items-center relative hover:shadow-lg transition-all ${draggedFile === receipt.fileName ? 'opacity-50' : ''}`}
-                                    draggable
-                                    onDragStart={() => setDraggedFile(receipt.fileName)}
-                                    onDragEnd={() => { setDraggedFile(null); setDragOverFolder(null); }}
-                                >
-                                    {/* Checkbox for selection */}
-                                    <input
-                                        type="checkbox"
-                                        checked={selected.has(receipt.fileName)}
-                                        onChange={e => handleCheckboxChange(receipt.fileName, e.target.checked)}
-                                        className="absolute left-2 top-2 accent-blue-600 w-5 h-5 rounded border-gray-300 focus:ring-2 focus:ring-blue-400 transition-all"
-                                    />
-                                    {/* Thumbnail (click to preview) */}
-                                    <img
-                                        src={receipt.filePath}
-                                        alt={receipt.fileName}
-                                        className="w-32 h-32 object-contain mb-2 border rounded bg-gray-50 cursor-zoom-in"
-                                        onClick={() => setPreviewImg(receipt.filePath)}
-                                    />
-                                    {/* Structured Fields Display */}
-                                    <div className="w-full text-left text-xs text-gray-700 mb-2">
-                                        {receipt.fields && (
-                                            <>
-                                                {receipt.fields.date && <div><b>Date:</b> {receipt.fields.date}</div>}
-                                                {receipt.fields.amount && <div><b>Amount:</b> {receipt.fields.amount}</div>}
-                                                {receipt.fields.vendor && <div><b>Vendor:</b> {receipt.fields.vendor}</div>}
-                                                {receipt.fields.tax && <div><b>Tax:</b> {receipt.fields.tax}</div>}
-                                            </>
-                                        )}
-                                        {receipt.category && <div><b>Category:</b> {receipt.category}</div>}
-                                    </div>
-                                    {/* Delete Button */}
-                                    <button
-                                        className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm mb-2 w-full"
-                                        onClick={() => handleDelete(receipt.fileName)}
-                                    >Delete</button>
-                                    {/* View Text Button (optional, if you want to show OCR text) */}
-                                    {/* ...existing preview/ocr logic if needed... */}
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    {/* --- Floating Plus Button for Creating Folder --- */}
-                    <button
-                        className="fixed bottom-8 right-8 z-50 bg-blue-600 hover:bg-blue-700 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-xl text-4xl transition-all backdrop-blur-md hover:scale-105 focus:outline-none"
-                        style={{ boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.15)' }}
-                        onClick={() => setShowCreateFolder(true)}
-                        title="Create new folder"
-                    >
-                        +
-                    </button>
-                    {/* --- Create Folder Modal --- */}
-                    {showCreateFolder && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-xl bg-white/30">
-                            <div className="bg-white/80 rounded-3xl shadow-2xl p-8 w-96 flex flex-col gap-4 border border-blue-100 relative animate-fade-in">
-                                <button
-                                    className="absolute top-4 right-4 text-gray-400 hover:text-blue-600 text-2xl focus:outline-none"
-                                    onClick={() => setShowCreateFolder(false)}
-                                    aria-label="Close"
-                                >
-                                    &times;
-                                </button>
-                                <h2 className="text-xl font-bold mb-2 text-blue-700">Create New Folder</h2>
-                                <label className="text-xs font-semibold text-gray-600">Folder Name</label>
-                                <input
-                                    className="border border-blue-200 rounded-full px-4 py-2 text-base focus:ring-2 focus:ring-blue-200 outline-none transition-all bg-white/70"
-                                    value={newFolderName}
-                                    onChange={e => setNewFolderName(e.target.value)}
-                                    placeholder="Folder name"
-                                />
-                                <label className="text-xs font-semibold text-gray-600 mt-2">Color</label>
-                                <div className="flex items-center gap-4 mt-1">
-                                    <input
-                                        type="color"
-                                        className="w-12 h-12 p-0 border-none bg-transparent rounded-full shadow"
-                                        value={newFolderColor}
-                                        onChange={e => setNewFolderColor(e.target.value)}
-                                        style={{ cursor: 'pointer' }}
-                                    />
-                                    <span className="text-sm font-mono text-gray-500">{newFolderColor}</span>
-                                </div>
-                                <div className="flex gap-3 mt-6">
-                                    <button
-                                        className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-base font-semibold shadow-md transition-all disabled:opacity-50"
-                                        onClick={handleCreateFolder}
-                                        disabled={!newFolderName}
-                                    >Create</button>
-                                    <button
-                                        className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full text-base font-semibold shadow-sm transition-all"
-                                        onClick={() => setShowCreateFolder(false)}
-                                    >Cancel</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {/* --- Receipt Image Preview Modal --- */}
-                    {previewImg && (
-                        <div
-                            className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-xl bg-white/30"
-                            onClick={closePreview}
+                        {renderFolderTree(folderTree)}
+                        <button
+                            className="mt-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-all w-full justify-center"
+                            onClick={() => setShowCreateFolder(true)}
                         >
-                            <div
-                                className="relative max-w-3xl w-full flex flex-col items-center"
-                                onClick={e => e.stopPropagation()}
-                            >
-                                <button
-                                    className="absolute top-2 right-2 text-gray-400 hover:text-blue-600 text-3xl focus:outline-none"
-                                    onClick={closePreview}
-                                    aria-label="Close preview"
-                                >
-                                    &times;
-                                </button>
-                                <img
-                                    src={previewImg}
-                                    alt="Receipt preview"
-                                    className="rounded-2xl shadow-2xl max-h-[80vh] w-auto object-contain bg-white"
-                                />
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            New Folder
+                        </button>
+                    </aside>
+                    {/* --- Main Content --- */}
+                    <div className="flex-1 min-w-0">
+                        {renderBreadcrumb()}
+                        {/* --- Bulk Action Dropdown Menu --- */}
+                        {displayedReceipts.length > 0 && (
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="relative">
+                                    <button
+                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-sm font-semibold shadow transition-all"
+                                        onClick={handleSelectAll}
+                                    >
+                                        {selected.size === displayedReceipts.length && displayedReceipts.length > 0 ? "Deselect All" : "Select All"}
+                                    </button>
+                                </div>
+                                {selected.size > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={bulkFolder}
+                                            onChange={e => setBulkFolder(e.target.value)}
+                                            className="px-3 py-2 border rounded text-sm"
+                                        >
+                                            <option value="">Move to folder...</option>
+                                            {folders.map(f => (
+                                                <option key={f} value={f}>{f}</option>
+                                            ))}
+                                            <option value="new">+ Create New Folder</option>
+                                        </select>
+                                        {bulkFolder === "new" && (
+                                            <input
+                                                type="text"
+                                                value={newBulkFolder}
+                                                onChange={e => setNewBulkFolder(e.target.value)}
+                                                placeholder="New folder name"
+                                                className="px-3 py-2 border rounded text-sm"
+                                            />
+                                        )}
+                                        {(bulkFolder || newBulkFolder) && (
+                                            <button
+                                                className="px-3 py-2 bg-blue-600 text-white rounded text-sm"
+                                                onClick={() => handleBulkMove(newBulkFolder || bulkFolder)}
+                                                disabled={!(newBulkFolder || bulkFolder)}
+                                            >
+                                                Move
+                                            </button>
+                                        )}
+                                        <button
+                                            className="px-3 py-2 bg-red-600 text-white rounded text-sm"
+                                            onClick={handleBulkDelete}
+                                        >
+                                            Delete Selected
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    )}
+                        )}
+                        {/* --- Back to Parent Button (if inside a folder) --- */}
+                        {currentFolder && (
+                            <button
+                                className="mb-4 flex items-center gap-2 text-blue-600 hover:text-blue-800 font-semibold px-3 py-1 rounded bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all"
+                                onClick={() => setCurrentFolder("")}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                                </svg>
+                                Back to All Folders
+                            </button>
+                        )}
+                        {/* --- Folders and Receipts Grid --- */}
+                        <h1 className="text-3xl font-bold mb-4">Receipt Details</h1>
+                        {loading ? (
+                            <p>Loading receipts...</p>
+                        ) : receipts.length === 0 && folders.length === 0 ? (
+                            <p>No receipts or folders found.</p>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                                {/* --- Folder Cards: Only direct subfolders --- */}
+                                {folders.map((folder) => (
+                                    <div
+                                        key={folder}
+                                        className={`group bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg shadow hover:shadow-lg p-6 flex flex-col items-center justify-center transition-all hover:scale-105 focus:outline-none relative ${dragOverFolder === folder ? 'ring-4 ring-blue-400' : ''}`}
+                                        style={{ borderColor: meta[getSubfolderPath(currentFolder, folder)]?.color || undefined }}
+                                        onDragOver={e => { e.preventDefault(); setDragOverFolder(folder); }}
+                                        onDragLeave={e => { e.preventDefault(); setDragOverFolder(null); }}
+                                        onDrop={e => {
+                                            e.preventDefault();
+                                            if (draggedFile) handleDropToFolder(draggedFile, getSubfolderPath(currentFolder, folder));
+                                        }}
+                                    >
+                                        {/* Folder Icon */}
+                                        <button
+                                            className="absolute top-2 right-2 text-gray-400 hover:text-blue-600"
+                                            onClick={e => { e.stopPropagation(); setEditingFolder(getSubfolderPath(currentFolder, folder)); setEditName(folder); setEditColor(meta[getSubfolderPath(currentFolder, folder)]?.color || ""); }}
+                                            title="Edit folder"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13h3l8-8a2.828 2.828 0 10-4-4l-8 8v3z" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            className="w-full flex flex-col items-center focus:outline-none"
+                                            onClick={() => setCurrentFolder(getSubfolderPath(currentFolder, folder))}
+                                            tabIndex={0}
+                                            style={{ color: meta[getSubfolderPath(currentFolder, folder)]?.color || undefined }}
+                                        >
+                                            <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 3h6a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                                            </svg>
+                                            <span className="font-semibold text-lg truncate w-full text-center">{meta[getSubfolderPath(currentFolder, folder)]?.name || folder}</span>
+                                            <span className="text-xs mt-1">Folder</span>
+                                        </button>
+                                        {/* Edit Modal (inline) */}
+                                        {editingFolder === getSubfolderPath(currentFolder, folder) && (
+                                            <div className="absolute z-50 top-10 left-1/2 -translate-x-1/2 bg-white border border-blue-200 rounded-lg shadow-lg p-4 w-64 flex flex-col gap-2">
+                                                <label className="text-xs font-semibold">Folder Name</label>
+                                                <input
+                                                    className="border rounded px-2 py-1 text-sm"
+                                                    value={editName}
+                                                    onChange={e => setEditName(e.target.value)}
+                                                />
+                                                <label className="text-xs font-semibold mt-2">Color</label>
+                                                <input
+                                                    type="color"
+                                                    className="w-8 h-8 p-0 border-none bg-transparent"
+                                                    value={editColor || "#3b82f6"}
+                                                    onChange={e => setEditColor(e.target.value)}
+                                                />
+                                                <div className="flex gap-2 mt-3">
+                                                    <button
+                                                        className="flex-1 px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                                                        onClick={handleEditFolderSubmit}
+                                                    >Save</button>
+                                                    <button
+                                                        className="flex-1 px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs"
+                                                        onClick={() => setEditingFolder(null)}
+                                                    >Cancel</button>
+                                                </div>
+                                                <button
+                                                    className="mt-2 px-2 py-1 bg-red-600 text-white rounded text-xs w-full"
+                                                    onClick={() => handleDeleteFolder(getSubfolderPath(currentFolder, folder))}
+                                                >Delete Folder</button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                                {/* --- Receipt Cards (structured data) --- */}
+                                {displayedReceipts.map((receipt) => (
+                                    <div
+                                        key={receipt._id || receipt.fileName}
+                                        className={`bg-white border rounded-lg shadow p-4 flex flex-col items-center relative hover:shadow-lg transition-all ${draggedFile === receipt.fileName ? 'opacity-50' : ''}`}
+                                        draggable
+                                        onDragStart={() => setDraggedFile(receipt.fileName)}
+                                        onDragEnd={() => { setDraggedFile(null); setDragOverFolder(null); }}
+                                    >
+                                        {/* Checkbox for selection */}
+                                        <input
+                                            type="checkbox"
+                                            checked={selected.has(receipt.fileName)}
+                                            onChange={e => handleCheckboxChange(receipt.fileName, e.target.checked)}
+                                            className="absolute left-2 top-2 accent-blue-600 w-5 h-5 rounded border-gray-300 focus:ring-2 focus:ring-blue-400 transition-all"
+                                        />
+                                        {/* Thumbnail (click to preview) */}
+                                        <img
+                                            src={receipt.filePath}
+                                            alt={receipt.fileName}
+                                            className="w-32 h-32 object-contain mb-2 border rounded bg-gray-50 cursor-zoom-in"
+                                            onClick={() => setPreviewImg(receipt.filePath)}
+                                        />
+                                        {/* Structured Fields Display */}
+                                        <div className="w-full text-left text-xs text-gray-700 mb-2">
+                                            {receipt.fields && (
+                                                <>
+                                                    {receipt.fields.date && <div><b>Date:</b> {receipt.fields.date}</div>}
+                                                    {receipt.fields.amount && <div><b>Amount:</b> {receipt.fields.amount}</div>}
+                                                    {receipt.fields.vendor && <div><b>Vendor:</b> {receipt.fields.vendor}</div>}
+                                                    {receipt.fields.tax && <div><b>Tax:</b> {receipt.fields.tax}</div>}
+                                                </>
+                                            )}
+                                            {receipt.category && <div><b>Category:</b> {receipt.category}</div>}
+                                        </div>
+                                        {/* Delete Button */}
+                                        <button
+                                            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm mb-2 w-full"
+                                            onClick={() => handleDelete(receipt.fileName)}
+                                        >Delete</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {/* --- Floating Plus Button for Creating Folder --- */}
+                        <button
+                            className="fixed bottom-8 right-8 z-50 bg-blue-600 hover:bg-blue-700 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-xl text-4xl transition-all backdrop-blur-md hover:scale-105 focus:outline-none"
+                            style={{ boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.15)' }}
+                            onClick={() => setShowCreateFolder(true)}
+                            title="Create new folder"
+                        >
+                            +
+                        </button>
+                        {/* --- Create Folder Modal --- */}
+                        {showCreateFolder && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-xl bg-white/30">
+                                <div className="bg-white/80 rounded-3xl shadow-2xl p-8 w-96 flex flex-col gap-4 border border-blue-100 relative animate-fade-in">
+                                    <button
+                                        className="absolute top-4 right-4 text-gray-400 hover:text-blue-600 text-2xl focus:outline-none"
+                                        onClick={() => setShowCreateFolder(false)}
+                                        aria-label="Close"
+                                    >
+                                        &times;
+                                    </button>
+                                    <h2 className="text-xl font-bold mb-2 text-blue-700">Create New Folder</h2>
+                                    <label className="text-xs font-semibold text-gray-600">Folder Name</label>
+                                    <input
+                                        className="border border-blue-200 rounded-full px-4 py-2 text-base focus:ring-2 focus:ring-blue-200 outline-none transition-all bg-white/70"
+                                        value={newFolderName}
+                                        onChange={e => setNewFolderName(e.target.value)}
+                                        placeholder="Folder name"
+                                    />
+                                    <label className="text-xs font-semibold text-gray-600 mt-2">Color</label>
+                                    <div className="flex items-center gap-4 mt-1">
+                                        <input
+                                            type="color"
+                                            className="w-12 h-12 p-0 border-none bg-transparent rounded-full shadow"
+                                            value={newFolderColor}
+                                            onChange={e => setNewFolderColor(e.target.value)}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                        <span className="text-sm font-mono text-gray-500">{newFolderColor}</span>
+                                    </div>
+                                    <div className="flex gap-3 mt-6">
+                                        <button
+                                            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-base font-semibold shadow-md transition-all disabled:opacity-50"
+                                            onClick={handleCreateFolder}
+                                            disabled={!newFolderName}
+                                        >Create</button>
+                                        <button
+                                            className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full text-base font-semibold shadow-sm transition-all"
+                                            onClick={() => setShowCreateFolder(false)}
+                                        >Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {/* --- Receipt Image Preview Modal --- */}
+                        {previewImg && (
+                            <div
+                                className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-xl bg-white/30"
+                                onClick={closePreview}
+                            >
+                                <div
+                                    className="relative max-w-3xl w-full flex flex-col items-center"
+                                    onClick={e => e.stopPropagation()}
+                                >
+                                    <button
+                                        className="absolute top-2 right-2 text-gray-400 hover:text-blue-600 text-3xl focus:outline-none"
+                                        onClick={closePreview}
+                                        aria-label="Close preview"
+                                    >
+                                        &times;
+                                    </button>
+                                    <img
+                                        src={previewImg}
+                                        alt="Receipt preview"
+                                        className="rounded-2xl shadow-2xl max-h-[80vh] w-auto object-contain bg-white"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             ) : (
                 // Ask user to sign in if not already authenticated

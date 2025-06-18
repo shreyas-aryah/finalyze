@@ -5,27 +5,55 @@ import { useEffect, useState } from "react";
 
 export default function InsightsPage() {
     const { isLoaded, isSignedIn } = useUser();
-    const [insights, setInsights] = useState<any>(null);
+    const [summary, setSummary] = useState<any>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        async function fetchInsights() {
+        async function fetchSummary() {
             setLoading(true);
             setError(null);
             try {
                 const res = await fetch("/api/receipts/summary");
-                if (!res.ok) throw new Error("Failed to fetch insights");
+                if (!res.ok) throw new Error("Failed to fetch summary");
                 const data = await res.json();
-                setInsights(data.summary);
+                setSummary(data.summary);
             } catch (err: any) {
                 setError(err.message || "Unknown error");
             } finally {
                 setLoading(false);
             }
         }
-        if (isSignedIn) fetchInsights();
+        if (isSignedIn) fetchSummary();
     }, [isSignedIn]);
+
+    // Helper: Get top 3 spending categories
+    function getTopCategories() {
+        if (!summary?.categoryTotals) return [];
+        return Object.entries(summary.categoryTotals)
+            .sort((a: any, b: any) => b[1] - a[1])
+            .slice(0, 3);
+    }
+
+    // Helper: Generate savings suggestions based on top categories
+    function getSavingsSuggestions() {
+        if (!summary?.categoryTotals) return [];
+        const top = getTopCategories();
+        if (top.length === 0) return ["Upload receipts to get personalized tips!"];
+        return [
+            `Consider reducing spending in '${top[0][0]}' to save more each month.`,
+            top[1] ? `Try setting a budget for '${top[1][0]}' as well.` : null
+        ].filter(Boolean);
+    }
+
+    // Helper: Generate trends and predictions
+    function getTrends() {
+        if (!summary) return ["Upload more receipts to see trends!"];
+        return [
+            `Your total spending so far: $${summary.totalSpending?.toFixed(2) || 0}`,
+            `You have ${summary.receiptCount} receipts uploaded.`
+        ];
+    }
 
     if (!isLoaded) {
         return (
@@ -56,16 +84,13 @@ export default function InsightsPage() {
                             <p className="text-gray-500">Loading...</p>
                         ) : error ? (
                             <p className="text-red-500">{error}</p>
-                        ) : insights?.categoryTotals && Object.keys(insights.categoryTotals).length > 0 ? (
+                        ) : summary?.categoryTotals && Object.keys(summary.categoryTotals).length > 0 ? (
                             <ul className="text-gray-700 text-sm space-y-1">
-                                {Object.entries(insights.categoryTotals)
-                                    .sort((a: any, b: any) => b[1] - a[1])
-                                    .slice(0, 3)
-                                    .map(([cat, amt]) => (
-                                        <li key={cat}>
-                                            <span className="font-medium">{cat}:</span> ${Number(amt).toFixed(2)}
-                                        </li>
-                                    ))}
+                                {getTopCategories().map(([cat, amt]) => (
+                                    <li key={cat}>
+                                        <span className="font-medium">{cat}:</span> ${Number(amt).toFixed(2)}
+                                    </li>
+                                ))}
                             </ul>
                         ) : (
                             <p className="text-gray-500">No categories found.</p>
@@ -78,19 +103,12 @@ export default function InsightsPage() {
                             <p className="text-gray-500">Loading...</p>
                         ) : error ? (
                             <p className="text-red-500">{error}</p>
-                        ) : insights?.categoryTotals && Object.keys(insights.categoryTotals).length > 0 ? (
-                            <ul className="text-gray-700 text-sm space-y-1">
-                                {Object.entries(insights.categoryTotals)
-                                    .sort((a: any, b: any) => b[1] - a[1])
-                                    .slice(0, 1)
-                                    .map(([cat]) => (
-                                        <li key={cat}>
-                                            Try reducing your spending in <span className="font-medium">{cat}</span> for more savings!
-                                        </li>
-                                    ))}
-                            </ul>
                         ) : (
-                            <p className="text-gray-500">Upload more receipts to get personalized tips!</p>
+                            <ul className="text-gray-700 text-sm space-y-1">
+                                {getSavingsSuggestions().map((tip, i) => (
+                                    <li key={i}>{tip}</li>
+                                ))}
+                            </ul>
                         )}
                     </div>
                 </div>
@@ -101,13 +119,12 @@ export default function InsightsPage() {
                         <p className="text-gray-500">Loading...</p>
                     ) : error ? (
                         <p className="text-red-500">{error}</p>
-                    ) : insights ? (
-                        <ul className="text-gray-700 text-sm space-y-1">
-                            <li>Your total spending so far: <span className="font-medium">${insights.totalSpending?.toFixed(2) || 0}</span></li>
-                            <li>You have <span className="font-medium">{insights.receiptCount || 0}</span> receipts uploaded.</li>
-                        </ul>
                     ) : (
-                        <p className="text-gray-500">Upload more receipts to see trends!</p>
+                        <ul className="text-gray-700 text-sm space-y-1">
+                            {getTrends().map((trend, i) => (
+                                <li key={i}>{trend}</li>
+                            ))}
+                        </ul>
                     )}
                 </div>
             </div>

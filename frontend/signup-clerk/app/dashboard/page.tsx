@@ -25,25 +25,56 @@ export default function Dashboard() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [summary, setSummary] = useState<any>(null);
+    const [recentReceipts, setRecentReceipts] = useState<any[]>([]);
 
     // Fetch user's receipts from the backend API once the user is signed in
-    useEffect(() => {
-        async function fetchReceipts() {
-            setLoading(true); // Start loading state
-            try {
-                const res = await fetch("/api/receipts"); // Call receipts API
-                if (!res.ok) throw new Error("Failed to fetch receipts"); // Handle failed requests
-                const data = await res.json();
-                setReceipts(data.receipts || []); // Store receipts in state
-            } catch (error) {
-                console.error(error); // Log error to console
-            } finally {
-                setLoading(false); // End loading state
-            }
+    const fetchReceipts = async () => {
+        setLoading(true); // Start loading state
+        try {
+            const res = await fetch("/api/receipts"); // Call receipts API
+            if (!res.ok) throw new Error("Failed to fetch receipts"); // Handle failed requests
+            const data = await res.json();
+            setReceipts(data.receipts || []); // Store receipts in state
+        } catch (error) {
+            console.error(error); // Log error to console
+        } finally {
+            setLoading(false); // End loading state
         }
+    };
 
+    // Fetch summary for dashboard
+    const fetchSummary = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch("/api/receipts/summary");
+            if (!res.ok) throw new Error("Failed to fetch summary");
+            const data = await res.json();
+            setSummary(data.summary);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Fetch recent receipts for dashboard
+    const fetchRecentReceipts = async () => {
+        try {
+            const res = await fetch("/api/receipts/list");
+            if (!res.ok) throw new Error("Failed to fetch receipts");
+            const data = await res.json();
+            setRecentReceipts(data.receipts || []);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    useEffect(() => {
         if (isSignedIn) {
-            fetchReceipts(); // Only fetch if user is signed in
+            fetchReceipts();
+            fetchSummary();
+            fetchRecentReceipts();
         }
     }, [isSignedIn]);
 
@@ -62,17 +93,9 @@ export default function Dashboard() {
             });
             if (res.ok) {
                 setSuccess(true);
-                // Refetch receipts after upload
-                const data = await res.json();
-                setReceipts(prev => [
-                    {
-                        id: data._id || Date.now().toString(),
-                        fileName: files[0].name,
-                        date: new Date().toLocaleDateString(),
-                        amount: 0,
-                    },
-                    ...prev
-                ]);
+                await fetchReceipts();
+                await fetchSummary();
+                await fetchRecentReceipts();
             }
         } catch (err) {
             // Optionally handle error
@@ -121,18 +144,18 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
                     <h3 className="text-sm font-medium text-gray-500 mb-2">Total Receipts</h3>
-                    <p className="text-3xl font-bold text-gray-900">{receipts.length}</p>
+                    <p className="text-3xl font-bold text-gray-900">{summary?.receiptCount ?? 0}</p>
                 </div>
                 <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
                     <h3 className="text-sm font-medium text-gray-500 mb-2">Total Spent</h3>
                     <p className="text-3xl font-bold text-gray-900">
-                        ${receipts.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2)}
+                        ${typeof summary?.totalSpending === 'number' ? summary.totalSpending.toFixed(2) : '0.00'}
                     </p>
                 </div>
                 <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-                    <h3 className="text-sm font-medium text-gray-500 mb-2">Average Amount</h3>
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">Top Category</h3>
                     <p className="text-3xl font-bold text-gray-900">
-                        ${receipts.length ? (receipts.reduce((sum, r) => sum + (r.amount || 0), 0) / receipts.length).toFixed(2) : '0.00'}
+                        {summary?.categoryTotals ? Object.entries(summary.categoryTotals as any).sort((a, b) => (b[1] as number) - (a[1] as number))[0]?.[0] || 'N/A' : 'N/A'}
                     </p>
                 </div>
             </div>
@@ -144,7 +167,7 @@ export default function Dashboard() {
                 </div>
                 {loading ? (
                     <div className="p-6 text-center text-gray-500">Loading receipts...</div>
-                ) : receipts.length === 0 ? (
+                ) : recentReceipts.length === 0 ? (
                     <div className="p-6 text-center text-gray-500">
                         <p className="mb-4">No receipts found. Upload some receipts to get started!</p>
                         <input
@@ -165,14 +188,14 @@ export default function Dashboard() {
                     </div>
                 ) : (
                     <div className="divide-y divide-gray-200">
-                        {receipts.slice(0, 5).map((receipt) => (
-                            <div key={receipt.id} className="p-6 hover:bg-gray-50 transition-colors">
+                        {recentReceipts.slice(0, 5).map((receipt) => (
+                            <div key={receipt._id || receipt.fileName} className="p-6 hover:bg-gray-50 transition-colors">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <h3 className="text-lg font-medium text-gray-900">{receipt.fileName}</h3>
-                                        <p className="text-sm text-gray-500">{receipt.date}</p>
+                                        <p className="text-sm text-gray-500">{receipt.fields?.date || (receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : '')}</p>
                                     </div>
-                                    <p className="text-lg font-semibold text-gray-900">${receipt.amount}</p>
+                                    <p className="text-lg font-semibold text-gray-900">${receipt.fields?.amount || '0.00'}</p>
                                 </div>
                             </div>
                         ))}

@@ -5,6 +5,7 @@ from typing import Optional
 import pytesseract
 from PIL import Image
 import io
+import re
 
 app = FastAPI()
 
@@ -23,7 +24,34 @@ async def extract_fields(file: UploadFile = File(...)):
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
         text = pytesseract.image_to_string(image)
-        return {"fields": {"raw_text": text}, "category": "Uncategorized"}
+
+        lines = text.splitlines()
+        total_keywords = ['total', 'amount due', 'balance due', 'amount to pay', 'amount', 'grand total']
+        amount = ""
+
+        # 1. Prefer numbers with a decimal in total lines
+        for line in lines:
+            if any(kw in line.lower() for kw in total_keywords):
+                amounts = re.findall(r"\$?\s*([0-9]+\.[0-9]{2})", line)
+                if amounts:
+                    amount = amounts[-1]
+        # 2. Fallback: numbers with a decimal anywhere
+        if not amount:
+            all_amounts = re.findall(r"\$?\s*([0-9]+\.[0-9]{2})", text)
+            if all_amounts:
+                amount = str(max(float(a.replace(',', '')) for a in all_amounts))
+        # 3. Fallback: numbers with a $ sign anywhere (integers)
+        if not amount:
+            all_amounts = re.findall(r"\$([0-9]+)", text)
+            if all_amounts:
+                amount = str(max(float(a.replace(',', '')) for a in all_amounts))
+        return {
+            "fields": {
+                "raw_text": text,
+                "amount": amount
+            },
+            "category": "Uncategorized"
+        }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"OCR extraction failed: {str(e)}"})
 

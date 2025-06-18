@@ -21,8 +21,13 @@ export async function GET(req: NextRequest) {
   const categoryTotals: Record<string, number> = {};
 
   for (const receipt of receipts) {
-    // Assume 'fields.amount' holds the expense value (customize if needed)
-    const amount = parseFloat(receipt.fields?.amount || 0);
+    // Robustly extract the amount as a number
+    let amount = 0;
+    if (receipt.fields?.amount) {
+      // Remove $ and commas, extract the first number
+      const match = receipt.fields.amount.replace(/[$,]/g, '').match(/\d+(\.\d{1,2})?/);
+      if (match) amount = parseFloat(match[0]);
+    }
     totalSpending += amount;
     const category = receipt.category || "Uncategorized";
     categoryTotals[category] = (categoryTotals[category] || 0) + amount;

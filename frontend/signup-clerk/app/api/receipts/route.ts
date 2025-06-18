@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
             fields: aiData.fields,
             category: aiData.category,
             createdAt: new Date(),
+            folder: ""
         });
 
         return NextResponse.json({ message: "Receipt processed", fields: aiData.fields, category: aiData.category });
@@ -120,19 +121,69 @@ export async function PATCH(req: NextRequest) {
     try {
         const body = await req.json();
         // --- Move file to folder ---
-        if (body.file && body.toFolder) {
+        if (body.file && body.toFolder !== undefined) {
             const { file, fromFolder = "", toFolder } = body;
-            const src = path.join(RECEIPTS_DIR, fromFolder, file);
-            const destDir = path.join(RECEIPTS_DIR, toFolder);
+            let src = path.join(RECEIPTS_DIR, fromFolder, file);
+            const destDir = toFolder ? path.join(RECEIPTS_DIR, toFolder) : RECEIPTS_DIR;
             await fs.mkdir(destDir, { recursive: true });
             const dest = path.join(destDir, file);
-            await fs.rename(src, dest);
-            return NextResponse.json({ message: "File moved" });
+            let fileMoved = false;
+            try {
+                await fs.rename(src, dest);
+                fileMoved = true;
+            } catch (err) {
+                // If file not found, search all folders for the file
+                try {
+                    const entries = await fs.readdir(RECEIPTS_DIR, { withFileTypes: true });
+                    // Check root
+                    let found = false;
+                    if (await fileExists(path.join(RECEIPTS_DIR, file))) {
+                        src = path.join(RECEIPTS_DIR, file);
+                        await fs.rename(src, dest);
+                        found = true;
+                        fileMoved = true;
+                    } else {
+                        for (const entry of entries) {
+                            if (entry.isDirectory()) {
+                                const possible = path.join(RECEIPTS_DIR, entry.name, file);
+                                if (await fileExists(possible)) {
+                                    src = possible;
+                                    await fs.rename(src, dest);
+                                    found = true;
+                                    fileMoved = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!found) {
+                        console.error(`File ${file} not found in any folder for move operation.`);
+                    }
+                } catch (searchErr) {
+                    console.error('Error searching for file to move:', searchErr);
+                }
+            }
+            // Update MongoDB: set folder field (even if empty string)
+            const { userId } = await auth();
+            if (userId) {
+                const client = await clientPromise;
+                const db = client.db("finalyze");
+                await db.collection("receipts").updateOne(
+                    { userId, fileName: file },
+                    { $set: { folder: toFolder } }
+                );
+            }
+            return NextResponse.json({ message: fileMoved ? "File moved" : "File not found, only DB updated" });
         }
         // --- Edit folder name or color ---
         if (body.editFolder) {
             const { oldName, newName, color } = body.editFolder;
             const meta = await readMetadata();
+            // Create new folder if oldName === newName and it doesn't exist
+            if (oldName && newName && oldName === newName) {
+                const folderPath = path.join(RECEIPTS_DIR, newName);
+                await fs.mkdir(folderPath, { recursive: true });
+            }
             // Rename folder on disk if name changed
             if (oldName && newName && oldName !== newName) {
                 const oldPath = path.join(RECEIPTS_DIR, oldName);
@@ -158,6 +209,16 @@ export async function PATCH(req: NextRequest) {
     }
 }
 
+// Helper to check if a file exists
+async function fileExists(path: string) {
+    try {
+        await fs.access(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 /* -------------------------------------------------- */
 /*  DELETE: Delete a file                             */
 /* -------------------------------------------------- */
@@ -168,7 +229,25 @@ export async function DELETE(req: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const { file, folder = "" } = await req.json();
+        const { file, folder = "", folder: folderToDelete } = await req.json();
+        // --- Folder delete logic ---
+        if (folderToDelete && !file) {
+            // Remove folder from disk
+            const folderPath = path.join(RECEIPTS_DIR, folderToDelete);
+            try {
+                await fs.rm(folderPath, { recursive: true, force: true });
+            } catch (err) {
+                // Folder may not exist, that's ok
+            }
+            // Remove from metadata
+            const meta = await readMetadata();
+            if (meta[folderToDelete]) {
+                delete meta[folderToDelete];
+                await writeMetadata(meta);
+            }
+            return NextResponse.json({ message: "Folder deleted" });
+        }
+        // ... existing file delete logic ...
         if (!file) {
             return NextResponse.json({ error: "Missing file" }, { status: 400 });
         }
