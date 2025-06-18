@@ -9,10 +9,10 @@ import { Button } from "../../components/ui/button";
 
 // Add this above your component
 type Receipt = {
-  id: string;
-  fileName: string;
-  date: string;
-  amount: number;
+    id: string;
+    fileName: string;
+    date: string;
+    amount: number;
 };
 
 export default function Dashboard() {
