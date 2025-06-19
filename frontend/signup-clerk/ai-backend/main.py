@@ -66,10 +66,48 @@ async def extract_fields_from_text(text: str = Form(...)):
 # --- Text Classification Endpoint (Category Labeling) ---
 text_classifier = pipeline("text-classification", model="distilbert-base-uncased")
 
+# Map model labels to user-friendly categories
+CATEGORY_MAP = {
+    "LABEL_0": "food",
+    "LABEL_1": "travel",
+    "LABEL_2": "entertainment",
+    "LABEL_3": "shopping",
+    "LABEL_4": "utilities",
+    # Add more as needed
+}
+
+# --- Improved Multi-Category Keyword-Based Classification ---
+CATEGORY_KEYWORDS = {
+    "food": ["restaurant", "burger", "pizza", "salad", "diner", "cafe", "food", "meal", "grill", "bistro", "bar", "steakhouse", "kitchen"],
+    "travel": ["flight", "uber", "lyft", "hotel", "taxi", "airbnb", "train", "bus", "car rental", "airport", "boarding pass"],
+    "entertainment": ["movie", "cinema", "theater", "concert", "show", "amc", "regal", "ticket", "event", "museum", "zoo", "park"],
+    "shopping": ["store", "walmart", "target", "costco", "receipt", "purchase", "mall", "shop", "grocery", "supermarket"],
+    "utilities": ["electric", "water", "gas", "utility", "internet", "cable", "bill", "statement", "energy", "comcast", "verizon"],
+}
+
+def best_keyword_category(text):
+    text_lower = text.lower()
+    scores = {}
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        hits = sum(1 for word in keywords if word in text_lower)
+        if hits:
+            scores[category] = hits
+    if scores:
+        # Pick the category with the most keyword hits
+        return max(scores, key=scores.get)
+    return None
+
 @app.post("/classify")
 async def classify_text(text: str = Form(...)):
+    # 1. Try improved keyword-based rules first (multi-category, hit-count based)
+    rule_category = best_keyword_category(text)
+    if rule_category:
+        return {"category": rule_category, "score": 1.0, "source": "rule"}
+    # 2. Otherwise, use the model
     results = text_classifier(text)
-    return {"category": results[0]["label"], "score": results[0]["score"]}
+    raw_label = results[0]["label"]
+    category = CATEGORY_MAP.get(raw_label, "Other")
+    return {"category": category, "score": results[0]["score"], "source": "model"}
 
 # --- Document QA Endpoint ---
 document_qa = pipeline("question-answering", model="impira/layoutlm-document-qa")

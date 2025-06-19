@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
         await fs.mkdir(RECEIPTS_DIR, { recursive: true }); // ensure dir exists
         await fs.writeFile(filePath, buffer);
 
-        // Call Python AI backend for field extraction and categorization
+        // Call Python AI backend for field extraction
         const form = new FormData();
         form.append("file", buffer, file.name);
         const aiRes = await fetch("http://localhost:8000/extract", {
@@ -58,6 +58,20 @@ export async function POST(req: NextRequest) {
         });
         const aiData = await aiRes.json();
 
+        // --- AI-powered categorization: Call /classify with OCR text to get category ---
+        let category = "Uncategorized";
+        if (aiData.fields?.raw_text) {
+            const classifyRes = await fetch("http://localhost:8000/classify", {
+                method: "POST",
+                body: new URLSearchParams({ text: aiData.fields.raw_text }),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" }
+            });
+            if (classifyRes.ok) {
+                const classifyData = await classifyRes.json();
+                category = classifyData.category || category;
+            }
+        }
+
         // Store in MongoDB
         const client = await clientPromise;
         const db = client.db("finalyze");
@@ -66,7 +80,7 @@ export async function POST(req: NextRequest) {
             fileName,
             filePath: `/receipts/${fileName}`,
             fields: aiData.fields,
-            category: aiData.category,
+            category,
             createdAt: new Date(),
             folder: ""
         });
