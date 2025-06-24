@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
         const { userId } = await auth();
         const formData = await req.formData();
         const file = formData.get("file") as File;
+        // Get OCR language from form (default to 'eng' if not provided)
+        const lang = (formData.get("lang") as string) || 'eng';
 
         if (!file) {
             return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -51,6 +53,7 @@ export async function POST(req: NextRequest) {
         // Call Python AI backend for field extraction
         const form = new FormData();
         form.append("file", buffer, file.name);
+        form.append("lang", lang); // Pass OCR language to backend
         const aiRes = await fetch("http://localhost:8000/extract", {
             method: "POST",
             body: form,
@@ -58,8 +61,36 @@ export async function POST(req: NextRequest) {
         });
         const aiData = await aiRes.json();
 
+        // --- Vendor Matching Helper ---
+        async function matchVendor(vendorName: string) {
+            if (!vendorName) return null;
+            const client = await clientPromise;
+            const db = client.db("finalyze");
+            const vendors = await db.collection("vendors").find().toArray();
+            const names = vendors.map(v => v.name);
+            // Simple fuzzy match using string similarity
+            function similarity(a: string, b: string) {
+                a = a.toLowerCase(); b = b.toLowerCase();
+                let matches = 0;
+                for (let i = 0; i < Math.min(a.length, b.length); i++) {
+                    if (a[i] === b[i]) matches++;
+                }
+                return matches / Math.max(a.length, b.length);
+            }
+            let best = null, bestScore = 0.7;
+            for (const v of vendors) {
+                const score = similarity(vendorName, v.name);
+                if (score > bestScore) {
+                    best = v;
+                    bestScore = score;
+                }
+            }
+            return best;
+        }
+
         // --- AI-powered categorization: Call /classify with OCR text to get category ---
         let category = "Uncategorized";
+        let vendorInfo = null;
         if (aiData.fields?.raw_text) {
             const classifyRes = await fetch("http://localhost:8000/classify", {
                 method: "POST",
@@ -71,11 +102,15 @@ export async function POST(req: NextRequest) {
                 category = classifyData.category || category;
             }
         }
+        // --- Vendor matching and enrichment ---
+        if (aiData.fields?.vendor) {
+            vendorInfo = await matchVendor(aiData.fields.vendor);
+        }
 
         // Store in MongoDB
         const client = await clientPromise;
         const db = client.db("finalyze");
-        await db.collection("receipts").insertOne({
+        const receiptDoc: { [key: string]: any } = {
             userId,
             fileName,
             filePath: `/receipts/${fileName}`,
@@ -83,7 +118,11 @@ export async function POST(req: NextRequest) {
             category,
             createdAt: new Date(),
             folder: ""
-        });
+        };
+        if (vendorInfo) {
+            receiptDoc.vendorInfo = vendorInfo;
+        }
+        await db.collection("receipts").insertOne(receiptDoc);
 
         return NextResponse.json({ message: "Receipt processed", fields: aiData.fields, category: aiData.category });
     } catch (error) {

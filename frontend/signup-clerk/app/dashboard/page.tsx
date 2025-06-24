@@ -4,8 +4,21 @@
 import { SignInButton, useUser } from "@clerk/nextjs";
 
 // Routing and UI libraries
+import {
+    CategoryScale,
+    Chart as ChartJS,
+    Legend,
+    LinearScale,
+    LineElement,
+    PointElement,
+    Title,
+    Tooltip,
+} from 'chart.js';
 import { useEffect, useRef, useState } from "react";
+import { Line } from 'react-chartjs-2';
 import { Button } from "../../components/ui/button";
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 // Add this above your component
 type Receipt = {
@@ -27,6 +40,8 @@ export default function Dashboard() {
     const [success, setSuccess] = useState(false);
     const [summary, setSummary] = useState<any>(null);
     const [recentReceipts, setRecentReceipts] = useState<any[]>([]);
+    const [trends, setTrends] = useState<any[]>([]);
+    const [trendView, setTrendView] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
 
     // Fetch user's receipts from the backend API once the user is signed in
     const fetchReceipts = async () => {
@@ -70,13 +85,27 @@ export default function Dashboard() {
         }
     };
 
+    // Fetch trends for dashboard
+    const fetchTrends = async (view: 'daily' | 'weekly' | 'monthly' = 'monthly') => {
+        try {
+            const res = await fetch(`/api/receipts/trends?view=${view}`);
+            if (!res.ok) throw new Error("Failed to fetch trends");
+            const data = await res.json();
+            setTrends(data.trends || []);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
     useEffect(() => {
         if (isSignedIn) {
             fetchReceipts();
             fetchSummary();
             fetchRecentReceipts();
+            fetchTrends(trendView);
         }
-    }, [isSignedIn]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSignedIn, trendView]);
 
     // Upload handler for dashboard
     const handleDashboardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -158,6 +187,67 @@ export default function Dashboard() {
                         {summary?.categoryTotals ? Object.entries(summary.categoryTotals as any).sort((a, b) => (b[1] as number) - (a[1] as number))[0]?.[0] || 'N/A' : 'N/A'}
                     </p>
                 </div>
+            </div>
+
+            {/* Monthly Spending Trend Chart */}
+            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900">Spending Trend</h2>
+                    <div className="flex gap-2">
+                        <button
+                            className={`px-3 py-1 rounded-lg text-sm font-medium border transition-all ${trendView === 'daily' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-blue-50'}`}
+                            onClick={() => setTrendView('daily')}
+                        >
+                            Daily
+                        </button>
+                        <button
+                            className={`px-3 py-1 rounded-lg text-sm font-medium border transition-all ${trendView === 'weekly' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-blue-50'}`}
+                            onClick={() => setTrendView('weekly')}
+                        >
+                            Weekly
+                        </button>
+                        <button
+                            className={`px-3 py-1 rounded-lg text-sm font-medium border transition-all ${trendView === 'monthly' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-blue-50'}`}
+                            onClick={() => setTrendView('monthly')}
+                        >
+                            Monthly
+                        </button>
+                    </div>
+                </div>
+                {trends.length === 0 ? (
+                    <div className="text-gray-500">No trend data yet.</div>
+                ) : (
+                    <Line
+                        data={{
+                            labels: trends.map((t: any) => t.label || t.month || t.week || t.day),
+                            datasets: [
+                                {
+                                    label: 'Total Spent',
+                                    data: trends.map((t: any) => t.total),
+                                    borderColor: '#2563eb',
+                                    backgroundColor: 'rgba(37,99,235,0.1)',
+                                    tension: 0.3,
+                                    fill: true,
+                                    pointRadius: 4,
+                                    pointHoverRadius: 6,
+                                },
+                            ],
+                        }}
+                        options={{
+                            responsive: true,
+                            plugins: {
+                                legend: { display: false },
+                                title: { display: false },
+                                tooltip: { mode: 'index', intersect: false },
+                            },
+                            scales: {
+                                x: { title: { display: true, text: trendView.charAt(0).toUpperCase() + trendView.slice(1) } },
+                                y: { title: { display: true, text: 'Total Spent ($)' }, beginAtZero: true },
+                            },
+                        }}
+                        height={80}
+                    />
+                )}
             </div>
 
             {/* Recent Receipts */}

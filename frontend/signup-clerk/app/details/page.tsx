@@ -51,6 +51,12 @@ export default function DetailsPage() {
     const [previewImg, setPreviewImg] = useState<string | null>(null);
     // --- Local state for structured receipts ---
     const [structuredReceipts, setStructuredReceipts] = useState<any[]>([]); // Array of { fileName, filePath, fields, category, ... }
+    // --- State for split receipt modal ---
+    const [splitModal, setSplitModal] = useState<{ open: boolean, receipt: any | null }>({ open: false, receipt: null });
+    const [splitNumPeople, setSplitNumPeople] = useState(2);
+    const [splitResult, setSplitResult] = useState<any>(null);
+    const [splitLoading, setSplitLoading] = useState(false);
+    const [splitError, setSplitError] = useState<string | null>(null);
 
     // --- Helper: Refetch receipts from backend and update state ---
     async function refetchReceipts() {
@@ -437,6 +443,27 @@ export default function DetailsPage() {
         if (isSignedIn) refreshStructuredReceipts();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isSignedIn]);
+
+    // --- Handler to call /split-receipt backend ---
+    async function handleSplit(receipt: any, numPeople: number) {
+        setSplitLoading(true);
+        setSplitError(null);
+        setSplitResult(null);
+        try {
+            const text = receipt.fields?.raw_text || '';
+            const res = await fetch('http://localhost:8000/split-receipt', {
+                method: 'POST',
+                body: new URLSearchParams({ text, num_people: String(numPeople) }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            });
+            const data = await res.json();
+            setSplitResult(data);
+        } catch (err) {
+            setSplitError('Failed to split receipt.');
+        } finally {
+            setSplitLoading(false);
+        }
+    }
 
     // Show loading spinner while auth is initializing
     if (!isLoaded) {

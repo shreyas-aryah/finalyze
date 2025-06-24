@@ -13,6 +13,7 @@
     "@types/node-fetch": "^2.6.12",
     "chart.js": "^4.4.9",
     "form-data": "^4.0.3",
+    "framer-motion": "^12.19.1",
     "lucide-react": "^0.513.0",
     "mongodb": "^6.17.0",
     "next": "15.3.2",

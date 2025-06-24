@@ -21,6 +21,20 @@ export default function UploadPage() {
     const [preview, setPreview] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    /* ------------------------------------------------------------------ */
+    /*  Language selector for multi-language OCR                          */
+    /* ------------------------------------------------------------------ */
+    const [ocrLang, setOcrLang] = useState<string>('eng'); // Default to English, always string
+    // Supported languages for Tesseract OCR (add more as needed)
+    const ocrLanguages = [
+        { code: 'eng', label: 'English' },
+        { code: 'spa', label: 'Spanish' },
+        { code: 'fra', label: 'French' },
+        { code: 'deu', label: 'German' },
+        { code: 'ita', label: 'Italian' },
+        { code: 'por', label: 'Portuguese' },
+        // Add more as needed
+    ];
 
     /* ------------------------------------------------------------------ */
     /*  Dropzone logic                                                    */
@@ -78,6 +92,7 @@ export default function UploadPage() {
         try {
             const formData = new FormData();
             formData.append("file", file);
+            formData.append("lang", ocrLang); // Pass selected OCR language
             const res = await fetch("/api/receipts", {
                 method: "POST",
                 body: formData,
@@ -135,6 +150,20 @@ export default function UploadPage() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
                 <h1 className="text-3xl font-bold text-gray-900 mb-6">Upload Receipt</h1>
                 <p className="text-gray-500 mb-8">Drag an image of your receipt into the box below, or click to browse.</p>
+                {/* Language Selector for OCR */}
+                <div className="mb-6">
+                    <label htmlFor="ocr-lang" className="block text-gray-700 font-medium mb-2">OCR Language:</label>
+                    <select
+                        id="ocr-lang"
+                        value={ocrLang}
+                        onChange={e => setOcrLang(e.target.value)}
+                        className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        {ocrLanguages.map(lang => (
+                            <option key={lang.code} value={lang.code}>{lang.label}</option>
+                        ))}
+                    </select>
+                </div>
                 {/* Upload Area */}
                 <div 
                     className={`border-2 border-dashed rounded-lg p-12 text-center ${
