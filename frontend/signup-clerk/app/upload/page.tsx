@@ -14,11 +14,11 @@ export default function UploadPage() {
     /* ------------------------------------------------------------------ */
     /*  Local state                                                      */
     /* ------------------------------------------------------------------ */
-    const [file, setFile] = useState<File | null>(null);
+    const [files, setFiles] = useState<File[]>([]);
     const [uploading, setUploading] = useState(false);
     const [ocrText, setOcrText] = useState<string | null>(null); // Store OCR extracted text
     const [isDragging, setIsDragging] = useState(false);
-    const [preview, setPreview] = useState<string | null>(null);
+    const [previews, setPreviews] = useState<string[]>([]);
     const [success, setSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     /* ------------------------------------------------------------------ */
@@ -40,14 +40,14 @@ export default function UploadPage() {
     /*  Dropzone logic                                                    */
     /* ------------------------------------------------------------------ */
     const onDrop = useCallback((acceptedFiles: File[]) => {
-        setFile(acceptedFiles[0]); // only store the first file
-        setOcrText(null);          // clear OCR text when new file selected
+        setFiles(acceptedFiles);
+        setOcrText(null);
     }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        multiple: false,
-        accept: { "image/*": [] }, // optional: limit to images
+        multiple: true,
+        accept: { "image/*": [] },
     });
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -71,9 +71,9 @@ export default function UploadPage() {
     };
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (files && files.length > 0) {
-            setFile(files[0]);
+        const selected = e.target.files;
+        if (selected && selected.length > 0) {
+            setFiles(Array.from(selected));
         }
     };
 
@@ -85,39 +85,41 @@ export default function UploadPage() {
     /*  Upload handler (POST with FormData)                               */
     /* ------------------------------------------------------------------ */
     const handleUpload = async () => {
-        if (!file || uploading) return; // Prevent double upload
+        if (files.length === 0 || uploading) return;
         setUploading(true);
-        setOcrText(null); // Clear previous OCR text on upload start
+        setOcrText(null);
         setSuccess(false);
-        try {
-            const formData = new FormData();
-            formData.append("file", file);
-            formData.append("lang", ocrLang); // Pass selected OCR language
-            const res = await fetch("/api/receipts", {
-                method: "POST",
-                body: formData,
-            });
-            let data;
+        let allSuccess = true;
+        for (const file of files) {
             try {
-                data = await res.json();
+                const formData = new FormData();
+                formData.append("file", file);
+                formData.append("lang", ocrLang);
+                const res = await fetch("/api/receipts", {
+                    method: "POST",
+                    body: formData,
+                });
+                let data;
+                try {
+                    data = await res.json();
+                } catch (err) {
+                    setOcrText("Error: Invalid response from server");
+                    allSuccess = false;
+                    continue;
+                }
+                if (!res.ok) {
+                    setOcrText(`Error: ${data.error || "Unknown error"}`);
+                    allSuccess = false;
+                }
             } catch (err) {
-                setOcrText("Error: Invalid response from server");
-                setUploading(false);
-                return;
+                console.error(err);
+                setOcrText(`Upload failed: ${String(err)}`);
+                allSuccess = false;
             }
-            if (res.ok) {
-                setOcrText(data.text || data.fields?.raw_text || "No text extracted");
-                setFile(null); // Clear file after successful upload
-                setSuccess(true); // Show success message
-            } else {
-                setOcrText(`Error: ${data.error || "Unknown error"}`);
-            }
-        } catch (err) {
-            console.error(err);
-            setOcrText(`Upload failed: ${String(err)}`);
-        } finally {
-            setUploading(false);
         }
+        setFiles([]);
+        setSuccess(allSuccess);
+        setUploading(false);
     };
 
     /* ------------------------------------------------------------------ */
@@ -134,16 +136,20 @@ export default function UploadPage() {
     /* ------------------------------------------------------------------ */
     /*  Page layout                                                      */
     /* ------------------------------------------------------------------ */
-    // Set preview image when file is selected
+    // Generate previews for all selected files
     useEffect(() => {
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => setPreview(reader.result as string);
-            reader.readAsDataURL(file);
+        if (files.length > 0) {
+            Promise.all(files.map(file => {
+                return new Promise<string>((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.readAsDataURL(file);
+                });
+            })).then(setPreviews);
         } else {
-            setPreview(null);
+            setPreviews([]);
         }
-    }, [file]);
+    }, [files]);
 
     return (
         <div className="max-w-3xl mx-auto">
@@ -173,26 +179,30 @@ export default function UploadPage() {
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                 >
-                    {file ? (
+                    {files.length > 0 ? (
                         <div className="space-y-4">
-                            <div className="flex items-center justify-center">
-                                <img 
-                                    src={preview} 
-                                    alt="Preview" 
-                                    className="max-h-64 rounded-lg shadow-sm"
-                                />
+                            <div className="flex flex-wrap gap-4 justify-center">
+                                {previews.map((src, i) => (
+                                    <div key={i} className="flex flex-col items-center">
+                                        <img
+                                            src={src}
+                                            alt={files[i]?.name || `Preview ${i}`}
+                                            className="max-h-40 rounded-lg shadow-sm"
+                                        />
+                                        <p className="text-xs text-gray-600 mt-1">{files[i]?.name}</p>
+                                    </div>
+                                ))}
                             </div>
-                            <p className="text-sm text-gray-600">{file.name}</p>
                             <div className="flex justify-center gap-4">
-                                <Button 
+                                <Button
                                     onClick={handleUpload}
                                     disabled={uploading}
                                     className="bg-blue-600 hover:bg-blue-700"
                                 >
-                                    {uploading ? 'Uploading...' : 'Upload'}
+                                    {uploading ? 'Uploading...' : `Upload ${files.length} Receipts`}
                                 </Button>
-                                <Button 
-                                    onClick={() => setFile(null)}
+                                <Button
+                                    onClick={() => setFiles([])}
                                     variant="outline"
                                 >
                                     Cancel
@@ -221,6 +231,7 @@ export default function UploadPage() {
                                 <input
                                     type="file"
                                     accept="image/*"
+                                    multiple
                                     onChange={handleFileSelect}
                                     className="hidden"
                                     ref={fileInputRef}
